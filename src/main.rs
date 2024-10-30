@@ -1,4 +1,7 @@
 use std::error::Error;
+use std::io::Error as ioError;
+use std::io::ErrorKind;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,7 +11,6 @@ use headless_chrome::protocol::cdp::Fetch::events::RequestPausedEvent;
 use headless_chrome::protocol::cdp::Fetch::{RequestPattern, RequestStage};
 use headless_chrome::protocol::cdp::Network::ResourceType;
 use headless_chrome::{Browser, LaunchOptions};
-use std::process::Command;
 
 fn main() -> Result<(), Box<dyn Error>> {
   let test_link = r"https://x.com/shitpost_2077/status/1851260612161966480";
@@ -16,7 +18,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   let result_clone = result.clone();
 
   println!("Starting browser");
-  let browser = Browser::new( LaunchOptions {
+  let browser = Browser::new(LaunchOptions {
     idle_browser_timeout: Duration::from_secs(60),
     args: vec![std::ffi::OsStr::new("--incognito")],
     ..Default::default()
@@ -33,33 +35,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     request_stage: Some(RequestStage::Request),
   };
 
-
   tab.enable_fetch(Some(&vec![pattern]), None)?;
   tab.enable_request_interception(interceptor)?;
 
   println!("Navigating to {}", test_link);
-  tab.navigate_to(&test_link)?.wait_until_navigated().expect("Failed to navigate to link");
+  tab
+    .navigate_to(&test_link)?
+    .wait_until_navigated()
+    .expect("Failed to navigate to link");
 
   let m3u8_url = result.lock().unwrap().to_owned();
   println!("Found m3u8 url: {}", m3u8_url);
   let pure_m3u8_url = m3u8_url.split("?").collect::<Vec<&str>>()[0];
-  
-  // std::thread::sleep(Duration::from_secs(10));
+
   println!("Executing ffmpeg command");
-  let command = Command::new("ffmpeg")
-    .arg("-y")
-    .args(["-i", &pure_m3u8_url])
-    .args(["-c", "copy"])
-    .arg("output.mp4")
-    .output()
-    .expect("failed to execute process");
+  downlaod_video(pure_m3u8_url).expect("Failed to execute ffmpeg command");
 
-  if command.status.success() {
-    println!("Downloaded video successfully");
-  } else {
-    println!("Failed to download video");
-  }
-
+  println!("Downloaded video successfully");
   Ok(())
 }
 
@@ -76,4 +68,18 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
       RequestPausedDecision::Continue(None)
     },
   )
+}
+
+fn downlaod_video(url: &str) -> Result<(), Box<dyn Error>> {
+  let exec = Command::new("ffmpeg")
+    .arg("-y")
+    .args(["-i", &url])
+    .args(["-c", "copy"])
+    .arg("output.mp4")
+    .output()?;
+
+  match exec.status.success() {
+    true => Ok(()),
+    false => Err(Box::new(ioError::new(ErrorKind::Other, "ffmpeg command failed"))),
+  }
 }
