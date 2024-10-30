@@ -17,15 +17,15 @@ use headless_chrome::protocol::cdp::{
 use headless_chrome::{Browser, LaunchOptions};
 
 fn main() -> Result<(), Box<dyn Error>> {
-  const USAGE: &str = "Usage: vid-downloader -i <input_link> [-o <output_file>]";
+  const USAGE: &str = "Usage: vid-downloader -i <input_link>";
   let args: Vec<String> = args().collect();
-  if args.len() < 3 {
+  if args.len() < 2 {
     println!("{}", USAGE);
     return Ok(());
   }
 
-  let (input_link, output_name) = parse_input(args);
-  if input_link.is_empty() {
+  let input_link = parse_input(args);
+  if input_link.trim().is_empty() {
     println!("{}", USAGE);
     return Ok(());
   }
@@ -52,9 +52,11 @@ fn main() -> Result<(), Box<dyn Error>> {
   tab.enable_fetch(Some(&vec![pattern]), None)?;
   tab.enable_request_interception(interceptor)?;
 
+  
   println!("Navigating to {}", input_link);
   tab
-    .navigate_to(&input_link)?
+    .navigate_to(&input_link)
+    .expect("Invalid url")
     .wait_until_navigated()
     .expect("Failed to navigate to link");
 
@@ -67,15 +69,14 @@ fn main() -> Result<(), Box<dyn Error>> {
   
   println!("Executing ffmpeg command");
   let pure_m3u8_url = m3u8_url.split("?").collect::<Vec<&str>>()[0];
-  downlaod_video(pure_m3u8_url, &output_name).expect("Failed to execute ffmpeg command");
+  downlaod_video(pure_m3u8_url).expect("Failed to execute ffmpeg command");
 
   println!("Downloaded video successfully");
   Ok(())
 }
 
-fn parse_input(args: Vec<String>) -> (String, String) {
+fn parse_input(args: Vec<String>) -> String {
   let mut input_link = String::new();
-  let mut output_name = String::from("video.mp4");
 
   let mut i = 1;
   while i < args.len() {
@@ -84,23 +85,14 @@ fn parse_input(args: Vec<String>) -> (String, String) {
         input_link = args[i + 1].clone();
         i += 1;
       }
-      "-o" if i + 1 < args.len() => {
-        output_name = args[i + 1].clone();
-        i += 1;
-      }
       _ => {
-        println!("Usage: vid-downloader -i <input_link> [-o <output_file>]");
-        return (String::new(), String::new());
+        return String::new();
       }
     }
     i += 1;
   }
 
-  if !output_name.ends_with(".mp4") {
-    output_name.push_str(".mp4");
-  }
-
-  (input_link, output_name)
+  input_link
 }
 
 fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
@@ -108,7 +100,7 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
     move |_transport: Arc<Transport>, _session_id: SessionId, event: RequestPausedEvent| {
       let request = event.params.request.clone();
 
-      if request.url.contains("tag=12") {
+      if request.url.contains("tag=") {
         let mut asd = result.lock().unwrap();
         *asd = event.params.request.url.to_owned();
       }
@@ -118,7 +110,9 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
   )
 }
 
-fn downlaod_video(url: &str, output_name: &str) -> Result<(), Box<dyn Error>> {
+fn downlaod_video(url: &str) -> Result<(), Box<dyn Error>> {
+  let mut output_name = url.split('/').last().unwrap().split('.').collect::<Vec<&str>>()[0].to_string();
+  output_name.push_str(".mp4");
   let output = Command::new("ffmpeg")
     .arg("-y")
     .args(["-i", &url])
