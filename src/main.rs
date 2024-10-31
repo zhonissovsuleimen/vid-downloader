@@ -4,6 +4,7 @@ use std::{
   process::Command,
   sync::{Arc, Mutex},
   time::Duration,
+  io::{self, Write},
 };
 
 use headless_chrome::browser::{
@@ -16,16 +17,17 @@ use headless_chrome::protocol::cdp::{
 };
 use headless_chrome::{Browser, LaunchOptions};
 
-fn main() -> Result<(), Box<dyn Error>> {
-  const USAGE: &str = "Usage: vid-downloader -i <input_link>";
-  let args: Vec<String> = args().collect();
-  if args.len() < 2 {
-    println!("{}", USAGE);
-    return Ok(());
-  }
+struct InputArgs {
+  url: String,
+  keep_alive: bool,
+}
 
-  let input_link = parse_input(args);
-  if input_link.trim().is_empty() {
+fn main() -> Result<(), Box<dyn Error>> {
+  const USAGE: &str = "Usage: vid-downloader [options]\nOptions:\n  -i --input: input url\n  -a --keep-alive: keep handling incoming links\n";
+  let args: Vec<String> = args().collect();
+  let mut input = parse_input(args);
+  
+  if input.url.is_empty() && !input.keep_alive {
     println!("{}", USAGE);
     return Ok(());
   }
@@ -44,55 +46,78 @@ fn main() -> Result<(), Box<dyn Error>> {
   let interceptor = get_interceptor(result.clone());
 
   let pattern = RequestPattern {
-    url_pattern: Some("https://video.twimg.com/ext_tw_video/*".to_string()),
+    url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
     resource_Type: Some(ResourceType::Xhr),
     request_stage: Some(RequestStage::Request),
   };
 
   tab.enable_fetch(Some(&vec![pattern]), None)?;
   tab.enable_request_interception(interceptor)?;
+  println!("Caching twitter");
+  tab.navigate_to("https://x.com/jack/status/20").expect("Failed to open twitter").wait_until_navigated().expect("Failed to navigate to twitter");
 
-  
-  println!("Navigating to {}", input_link);
-  tab
-    .navigate_to(&input_link)
-    .expect("Invalid url")
-    .wait_until_navigated()
-    .expect("Failed to navigate to link");
+  loop {
+    if input.url.is_empty() {
+      print!("Enter a url: ");
+      io::stdout().flush().unwrap();
+      let mut url = String::new();
+      io::stdin().read_line(&mut url).expect("Failed to read line");
+      input.url = url.trim().to_string();
+    }
 
-  let m3u8_url = result.lock().unwrap().to_owned();
-  if m3u8_url.is_empty() {
-    println!("Failed to find m3u8 url");
-    return Ok(());
+    println!("Navigating to {}", input.url);
+    if tab.navigate_to(&input.url).is_err() {
+      println!("Failed to navigate to link");
+      input.url.clear();
+      continue;
+    }
+    tab.wait_until_navigated()?;
+
+    let m3u8_url = result.lock().unwrap().to_owned();
+    if m3u8_url.is_empty() {
+      println!("Failed to find m3u8 url");
+      input.url.clear();
+      continue;
+    }
+    println!("Found m3u8 url: {}", m3u8_url);
+
+    println!("Executing ffmpeg command");
+    let pure_m3u8_url = m3u8_url.split("?").collect::<Vec<&str>>()[0];
+    download_video(pure_m3u8_url).expect("Failed to execute ffmpeg command");
+
+    println!("Downloaded video successfully");
+
+    input.url.clear();
+    result.lock().unwrap().clear();
+    if !input.keep_alive {
+      break;
+    }
   }
-  println!("Found m3u8 url: {}", m3u8_url);
-  
-  println!("Executing ffmpeg command");
-  let pure_m3u8_url = m3u8_url.split("?").collect::<Vec<&str>>()[0];
-  downlaod_video(pure_m3u8_url).expect("Failed to execute ffmpeg command");
-
-  println!("Downloaded video successfully");
   Ok(())
 }
 
-fn parse_input(args: Vec<String>) -> String {
-  let mut input_link = String::new();
+fn parse_input(args: Vec<String>) -> InputArgs {
+  let mut input = InputArgs {
+    url: String::new(),
+    keep_alive: false,
+  };
 
   let mut i = 1;
   while i < args.len() {
     match args[i].as_str() {
-      "-i" if i + 1 < args.len() => {
-        input_link = args[i + 1].clone();
+      "--input" | "-i" if i + 1 < args.len() => {
+        input.url = args[i + 1].clone().trim().to_string();
         i += 1;
       }
-      _ => {
-        return String::new();
+      "--keep-alive" | "-a" => {
+        input.keep_alive = true;
       }
+      _ => {}
     }
     i += 1;
   }
 
-  input_link
+  input
 }
 
 fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
@@ -100,7 +125,8 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
     move |_transport: Arc<Transport>, _session_id: SessionId, event: RequestPausedEvent| {
       let request = event.params.request.clone();
 
-      if request.url.contains("tag=") {
+      if request.url.contains("tag=")
+        && result.lock().unwrap().is_empty() {
         let mut asd = result.lock().unwrap();
         *asd = event.params.request.url.to_owned();
       }
@@ -110,7 +136,7 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
   )
 }
 
-fn downlaod_video(url: &str) -> Result<(), Box<dyn Error>> {
+fn download_video(url: &str) -> Result<(), Box<dyn Error>> {
   let mut output_name = url.split('/').last().unwrap().split('.').collect::<Vec<&str>>()[0].to_string();
   output_name.push_str(".mp4");
   let output = Command::new("ffmpeg")
@@ -121,8 +147,8 @@ fn downlaod_video(url: &str) -> Result<(), Box<dyn Error>> {
     .output()?;
 
   if output.status.success() {
-    return Ok(());
+    Ok(())
   } else {
-    return Err(format!("ffmpeg command failed with status: {}", output.status).into());
+    Err(format!("ffmpeg command failed with status: {}", output.status).into())
   }
 }
