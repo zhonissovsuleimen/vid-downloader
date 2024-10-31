@@ -1,11 +1,12 @@
 use std::{
   env::args,
   error::Error,
-  process::Command,
+  io::{self, Write},
   sync::{Arc, Mutex},
   time::Duration,
-  io::{self, Write},
 };
+
+use tokio::process::Command;
 
 use headless_chrome::browser::{
   tab::{RequestInterceptor, RequestPausedDecision},
@@ -22,78 +23,51 @@ struct InputArgs {
   keep_alive: bool,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() {
   const USAGE: &str = "Usage: vid-downloader [options]\nOptions:\n  -i --input: input url\n  -a --keep-alive: keep handling incoming links\n";
   let args: Vec<String> = args().collect();
-  let mut input = parse_input(args);
-  
+  let input = parse_input(args);
+
   if input.url.is_empty() && !input.keep_alive {
     println!("{}", USAGE);
-    return Ok(());
+    return;
   }
 
   println!("Starting browser");
-  let browser = Browser::new(LaunchOptions {
-    idle_browser_timeout: Duration::from_secs(60),
-    args: vec![std::ffi::OsStr::new("--incognito")],
-    ..Default::default()
-  })?;
-
-  println!("Opening new tab");
-  let tab = browser.new_tab().expect("Failed to open tab");
-
-  let result = Arc::new(Mutex::new(String::new()));
-  let interceptor = get_interceptor(result.clone());
-
-  let pattern = RequestPattern {
-    url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
-    resource_Type: Some(ResourceType::Xhr),
-    request_stage: Some(RequestStage::Request),
+  let browser = match get_browser() {
+    Ok(browser) => browser,
+    Err(e) => {
+      eprintln!("Failed to start browser: {}", e);
+      return;
+    }
   };
+  let browser = Arc::new(browser);
 
-  tab.enable_fetch(Some(&vec![pattern]), None)?;
-  tab.enable_request_interception(interceptor)?;
-  println!("Caching twitter");
-  tab.navigate_to("https://x.com/jack/status/20").expect("Failed to open twitter").wait_until_navigated().expect("Failed to navigate to twitter");
+  let caching_clone = browser.clone();
+  tokio::spawn(async move {
+    cache_twitter(&caching_clone).await;
+  });
 
   loop {
+    let mut url = String::new();
     if input.url.is_empty() {
-      print!("Enter a url: ");
       io::stdout().flush().unwrap();
-      let mut url = String::new();
-      io::stdin().read_line(&mut url).expect("Failed to read line");
-      input.url = url.trim().to_string();
+      if io::stdin().read_line(&mut url).is_err() {
+        eprintln!("Failed to read line");
+        continue;
+      }
     }
 
-    println!("Navigating to {}", input.url);
-    if tab.navigate_to(&input.url).is_err() {
-      println!("Failed to navigate to link");
-      input.url.clear();
-      continue;
-    }
-    tab.wait_until_navigated()?;
+    let browser_clone = browser.clone();
+    tokio::spawn(async move {
+      download_video(&browser_clone, url.trim()).await;
+    });
 
-    let m3u8_url = result.lock().unwrap().to_owned();
-    if m3u8_url.is_empty() {
-      println!("Failed to find m3u8 url");
-      input.url.clear();
-      continue;
-    }
-    println!("Found m3u8 url: {}", m3u8_url);
-
-    println!("Executing ffmpeg command");
-    let pure_m3u8_url = m3u8_url.split("?").collect::<Vec<&str>>()[0];
-    download_video(pure_m3u8_url).expect("Failed to execute ffmpeg command");
-
-    println!("Downloaded video successfully");
-
-    input.url.clear();
-    result.lock().unwrap().clear();
     if !input.keep_alive {
       break;
     }
   }
-  Ok(())
 }
 
 fn parse_input(args: Vec<String>) -> InputArgs {
@@ -120,13 +94,28 @@ fn parse_input(args: Vec<String>) -> InputArgs {
   input
 }
 
+fn get_browser() -> Result<Browser, Box<dyn Error>> {
+  Ok(Browser::new(LaunchOptions {
+    idle_browser_timeout: Duration::from_secs(1e7 as u64),
+    args: vec![std::ffi::OsStr::new("--incognito")],
+    ..Default::default()
+  })?)
+}
+
+fn get_twitter_pattern() -> RequestPattern {
+  RequestPattern {
+    url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
+    resource_Type: Some(ResourceType::Xhr),
+    request_stage: Some(RequestStage::Request),
+  }
+}
+
 fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
   Arc::new(
     move |_transport: Arc<Transport>, _session_id: SessionId, event: RequestPausedEvent| {
       let request = event.params.request.clone();
 
-      if request.url.contains("tag=")
-        && result.lock().unwrap().is_empty() {
+      if request.url.contains("tag=") && result.lock().unwrap().is_empty() {
         let mut asd = result.lock().unwrap();
         *asd = event.params.request.url.to_owned();
       }
@@ -136,7 +125,57 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
   )
 }
 
-fn download_video(url: &str) -> Result<(), Box<dyn Error>> {
+async fn cache_twitter(browser: &Browser) {
+  let id = tokio::task::id();
+
+  let tab = match browser.new_tab() {
+    Ok(tab) => tab,
+    Err(e) => {
+      eprintln!("Failed cache twitter: {}", e);
+      return;
+    }
+  };
+
+  let pattern = get_twitter_pattern();
+  match tab.enable_fetch(Some(&vec![pattern]), None) {
+    Ok(_) => {}
+    Err(e) => {
+      eprintln!("Failed cache twitter: {}", e);
+      return;
+    }
+  }
+
+  let intercepted_result = Arc::new(Mutex::new(String::new()));
+  let interceptor = get_interceptor(intercepted_result.clone());
+  match tab.enable_request_interception(interceptor) {
+    Ok(_) => {}
+    Err(e) => {
+      eprintln!("Failed cache twitter: {}", e);
+      return;
+    }
+  }
+
+  match tab.navigate_to("https://x.com/jack/status/20") {
+    Ok(_) => {}
+    Err(e) => {
+      eprintln!("Failed cache twitter: {}", e);
+      return;
+    }
+  }
+
+  match tab.wait_until_navigated() {
+    Ok(_) => {}
+    Err(e) => {
+      eprintln!("Failed cache twitter: {}", e);
+      return;
+    }
+  }
+
+  println!("Task {}: Successfully cached twitter", id);
+  let _ = tab.close(false);
+}
+
+async fn execute_ffmpeg(url: &str) -> Result<(), Box<dyn Error>> {
   let mut output_name = url.split('/').last().unwrap().split('.').collect::<Vec<&str>>()[0].to_string();
   output_name.push_str(".mp4");
   let output = Command::new("ffmpeg")
@@ -144,11 +183,92 @@ fn download_video(url: &str) -> Result<(), Box<dyn Error>> {
     .args(["-i", &url])
     .args(["-c", "copy"])
     .arg(output_name)
-    .output()?;
+    .output()
+    .await;
 
-  if output.status.success() {
-    Ok(())
-  } else {
-    Err(format!("ffmpeg command failed with status: {}", output.status).into())
+  match output {
+    Ok(output) if output.status.success() => Ok(()),
+    _ => Err("Failed to execute ffmpeg command".into()),
+  }
+}
+
+async fn download_video(browser: &Browser, url: &str) {
+  let id = tokio::task::id();
+
+  let tab = match browser.new_tab() {
+    Ok(tab) => {
+      println!("Task {}: Successfully opened tab", id);
+      tab
+    }
+    Err(e) => {
+      eprintln!("Failed to open tab: {}", e);
+      return;
+    }
+  };
+
+  let pattern = get_twitter_pattern();
+  match tab.enable_fetch(Some(&vec![pattern]), None) {
+    Ok(_) => {}
+    Err(e) => {
+      eprintln!("Failed to enable fetch: {}", e);
+      return;
+    }
+  }
+
+  let intercepted_result = Arc::new(Mutex::new(String::new()));
+  let interceptor = get_interceptor(intercepted_result.clone());
+  match tab.enable_request_interception(interceptor) {
+    Ok(_) => {}
+    Err(e) => {
+      eprintln!("Failed to enable request interception: {}", e);
+      return;
+    }
+  }
+
+  match tab.navigate_to(url) {
+    Ok(_) => {}
+    Err(e) => {
+      eprintln!("Failed to navigate to link: {}", e);
+      return;
+    }
+  }
+
+  match tab.wait_until_navigated() {
+    Ok(_) => {
+      println!("Task {}: Successfully navigated to link", id);
+    }
+    Err(e) => {
+      eprintln!("Failed to navigate to link: {}", e);
+      return;
+    }
+  }
+
+  let m3u8_url = intercepted_result.lock().unwrap().to_owned();
+  match m3u8_url.is_empty() {
+    true => {
+      eprintln!("Failed to find m3u8 url");
+      return;
+    }
+    false => {
+      println!("Task {}: Found m3u8 url: {}", id, m3u8_url);
+    }
+  }
+
+  match execute_ffmpeg(&m3u8_url).await {
+    Ok(_) => {
+      println!("Task {}: Successfully downloaded video", id);
+    }
+    Err(e) => {
+      eprintln!("Failed to download video: {}", e);
+    }
+  }
+
+  match tab.close(false) {
+    Ok(_) => {
+      println!("Task {}: Successfully closed tab", id);
+    }
+    Err(e) => {
+      eprintln!("Failed to close tab: {}", e);
+    }
   }
 }
