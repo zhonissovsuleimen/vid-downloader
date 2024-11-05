@@ -6,8 +6,7 @@ use std::{
   time::Duration,
 };
 
-use reqwest::Client;
-
+use futures::future;
 use headless_chrome::protocol::cdp::{
   Fetch::{events::RequestPausedEvent, RequestPattern, RequestStage},
   Network::ResourceType,
@@ -20,6 +19,7 @@ use headless_chrome::{
   protocol::cdp::Target::CreateTarget,
 };
 use headless_chrome::{Browser, LaunchOptions};
+use reqwest;
 use tokio::process::Command;
 
 struct InputArgs {
@@ -29,7 +29,8 @@ struct InputArgs {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-  const USAGE: &str = "Usage: vid-downloader [options]\nOptions:\n  -i --input: input url\n  -a --keep-alive: keep handling incoming links\n";
+  const USAGE: &str =
+    "Usage: vid-downloader [options]\nOptions:\n  -i --input: input url\n  -a --keep-alive: keep handling incoming links\n";
   let args: Vec<String> = args().collect();
   let input = parse_input(args);
 
@@ -38,23 +39,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     return Ok(());
   }
 
-  let browser = match get_browser() {
-    Ok(browser) => {
-      println!("Successfully started browser");
-      Arc::new(browser)
-    }
-    Err(e) => {
-      eprintln!("Failed to start browser: {}", e);
-      return Ok(());
-    }
-  };
-
-  let client = Arc::new(Client::new());
+  let browser = Arc::new(get_browser()?);
 
   if !input.url.is_empty() {
     let browser_clone = browser.clone();
-    let client_clone = client.clone();
-    match download_video(&browser_clone, &client_clone, &input.url).await {
+    match download_video(&browser_clone, &input.url).await {
       Ok(_) => {
         println!("Successfully downloaded video");
       }
@@ -73,10 +62,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let browser_clone = browser.clone();
-    let client_clone = client.clone();
     tokio::spawn(async move {
       let id = tokio::task::id();
-      match download_video(&browser_clone, &client_clone, &input_url).await {
+      match download_video(&browser_clone, &input_url).await {
         Ok(_) => {
           println!("Task {}: Successfully downloaded video", id);
         }
@@ -144,15 +132,8 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
   )
 }
 
-async fn get_media_playlist_urls(
-  client: &Client,
-  master_playlist_url: &str,
-) -> Result<(String, String), Box<dyn Error>> {
-  let twimg = String::from("https://video.twimg.com");
-  let (mut video, mut audio) = (twimg.clone(), twimg.clone());
-
-  let response = client.get(master_playlist_url).send().await;
-
+async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, String), Box<dyn Error>> {
+  let response = reqwest::get(master_playlist_url).await;
   let lines: Vec<String>;
   match response {
     Ok(result) => {
@@ -170,13 +151,11 @@ async fn get_media_playlist_urls(
     }
   }
 
+  let twimg = String::from("https://video.twimg.com");
+  let (mut video, mut audio) = (twimg.clone(), twimg.clone());
   match lines.len() > 1 {
     true => {
-      let pure_audio = lines[0]
-        .split('"')
-        .filter(|substring| !substring.is_empty())
-        .last()
-        .unwrap();
+      let pure_audio = lines[0].split('"').filter(|substring| !substring.is_empty()).last().unwrap();
       audio.push_str(pure_audio);
       video.push_str(lines[lines.len() / 2].as_str());
 
@@ -203,76 +182,44 @@ async fn get_segment_urls(text: &str) -> Vec<String> {
     .collect::<Vec<String>>()
 }
 
-async fn download_segments(client: &Client, urls: (String, String)) -> Result<(Vec<u8>, Vec<u8>), Box<dyn Error>> {
-  let video_text;
-  let audio_text;
+fn get_download_tasks(urls: Vec<String>, data: Arc<Mutex<Vec<Vec<u8>>>>) -> Vec<tokio::task::JoinHandle<()>> {
+  let mut tasks = Vec::new();
+  for (i, url) in urls.into_iter().enumerate() {
+    let data = data.clone();
+    let task = tokio::spawn(async move {
+      let response = reqwest::get(url).await.unwrap();
+      let bytes = response.bytes().await.unwrap().to_vec();
+      data.lock().unwrap()[i] = bytes;
+    });
+    tasks.push(task);
+  }
 
-  match client.get(urls.0).send().await {
-    Ok(response) => {
-      video_text = response.text().await.unwrap();
-    }
-    Err(_) => return Err("Failed to get video segments".into()),
-  }
-  match client.get(urls.1).send().await {
-    Ok(response) => {
-      audio_text = response.text().await.unwrap();
-    }
-    Err(_) => return Err("Failed to get audio segments".into()),
-  }
+  tasks
+}
+
+async fn download_segments(urls: (String, String)) -> Result<(Vec<u8>, Vec<u8>), Box<dyn Error>> {
+  let video_text = reqwest::get(urls.0).await?.text().await?;
+  let audio_text = reqwest::get(urls.1).await?.text().await?;
 
   let video_urls = get_segment_urls(&video_text).await;
   let audio_urls = get_segment_urls(&audio_text).await;
 
-  let video_data = Arc::new(Mutex::new({
-    let mut v = Vec::with_capacity(video_urls.len());
-    v.extend((0..video_urls.len()).map(|_| Vec::new()));
-    v
-  }));
-  
-  let audio_data = Arc::new(Mutex::new({
-    let mut v = Vec::with_capacity(audio_urls.len());
-    v.extend((0..audio_urls.len()).map(|_| Vec::new()));
-    v
-  }));
+  let video_data = Arc::new(Mutex::new(vec![Vec::new(); video_urls.len()]));
+  let audio_data = Arc::new(Mutex::new(vec![Vec::new(); audio_urls.len()]));
 
-  let video_task = {
-    let client = client.clone();
-    let video_data = video_data.clone();
-    tokio::spawn(async move {
-      for (i, url) in video_urls.into_iter().enumerate() {
-        let response = client.get(url).send().await.unwrap();
-        let data = response.bytes().await.unwrap().to_vec();
-        video_data.lock().unwrap()[i] = data;
-      }
-    })
-  };
+  let video_tasks = get_download_tasks(video_urls, video_data.clone());
+  let audio_tasks = get_download_tasks(audio_urls, audio_data.clone());
 
-  if video_task.await.is_err() {
-    return Err("Failed to download video segments".into());
-  }
+  let all_tasks: Vec<_> = video_tasks.into_iter().chain(audio_tasks.into_iter()).collect();
 
-  let audio_task = {
-    let client = client.clone();
-    let audio_data = audio_data.clone();
-    tokio::spawn(async move {
-      for (i, url) in audio_urls.into_iter().enumerate() {
-        let response = client.get(url).send().await.unwrap();
-        let data = response.bytes().await.unwrap().to_vec();
-        audio_data.lock().unwrap()[i] = data;
-      }
-    })
-  };
-
-  if audio_task.await.is_err() {
-    return Err("Failed to download audio segments".into());
-  }
+  future::join_all(all_tasks).await;
 
   let video_data = Arc::try_unwrap(video_data).unwrap().into_inner().unwrap().concat();
   let audio_data = Arc::try_unwrap(audio_data).unwrap().into_inner().unwrap().concat();
   Ok((video_data, audio_data))
 }
 
-async fn download_video(browser: &Browser, client: &Client, url: &str) -> Result<(), Box<dyn Error>> {
+async fn download_video(browser: &Browser, url: &str) -> Result<(), Box<dyn Error>> {
   let target = CreateTarget {
     url: "about::blank".to_string(),
     width: None,
@@ -283,61 +230,31 @@ async fn download_video(browser: &Browser, client: &Client, url: &str) -> Result
     background: Some(true),
   };
 
-  let tab;
-  match browser.new_tab_with_options(target) {
-    Ok(t) => {
-      tab = t;
-    }
-    Err(_) => {
-      return Err("Failed to open the tab".into());
-    }
-  };
-
-  let pattern = get_twitter_pattern();
-  if tab.enable_fetch(Some(&vec![pattern]), None).is_err() {
-    return Err("Failed to enable fetch".into());
-  }
-
+  let tab = browser.new_tab_with_options(target)?;
   let intercepted_result = Arc::new(Mutex::new(String::new()));
   let interceptor = get_interceptor(intercepted_result.clone());
-  if tab.enable_request_interception(interceptor).is_err() {
-    return Err("Failed to enable request interception".into());
-  }
 
-  if tab.navigate_to(url).is_err() {
-    return Err("Failed to navigate to the link".into());
-  }
+  let pattern = get_twitter_pattern();
+  tab.enable_fetch(Some(&vec![pattern]), None)?;
+  tab.enable_request_interception(interceptor)?;
 
-  if tab.wait_until_navigated().is_err() {
-    return Err("Failed to navigate to the link".into());
-  }
+  tab.navigate_to(url)?;
+  tab.wait_until_navigated()?;
 
   let master_playlist_url = intercepted_result.lock().unwrap().to_owned();
   if master_playlist_url.is_empty() {
     return Err("Failed to find the m3u8 url".into());
   }
 
-  let mut media_urls = (String::new(), String::new());
-  match get_media_playlist_urls(client, &master_playlist_url).await {
-    Ok(result) => {
-      media_urls.0.push_str(&result.0);
-      media_urls.1.push_str(&result.1);
-    }
-    Err(_) => {
-      return Err("Failed to close the tab".into());
-    }
-  }
+  let media_urls = get_media_playlist_urls(&master_playlist_url).await?;
+
   let id = tokio::task::id();
   let output_name = media_urls.0.split('/').last().unwrap().replace(".m3u8", ".mp4");
   let video_name = format!("video_{}_{}", id, output_name);
   let audio_name = format!("audio_{}_{}", id, output_name);
-  
-  let segments = match download_segments(client, media_urls.clone()).await {
-    Ok(segments) => segments,
-    Err(_) => {
-      return Err(format!("Failed to download segments").into());
-    }
-  };
+
+  let segments = download_segments(media_urls.clone()).await?;
+
   tokio::fs::write(video_name.clone(), segments.0).await?;
   tokio::fs::write(audio_name.clone(), segments.1).await?;
 
@@ -347,11 +264,12 @@ async fn download_video(browser: &Browser, client: &Client, url: &str) -> Result
     .args(["-c", "copy"])
     .arg("-y")
     .arg(&output_name)
-    .output().await;
+    .output()
+    .await;
 
   std::fs::remove_file(video_name)?;
   std::fs::remove_file(audio_name)?;
-  
+
   if output.is_err() || !output.unwrap().status.success() {
     return Err("Failed to merge video and audio segments".into());
   }
