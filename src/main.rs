@@ -30,7 +30,7 @@ struct InputArgs {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
   const USAGE: &str =
-    "Usage: vid-downloader [options]\nOptions:\n  -i --input: input url\n  -a --keep-alive: keep handling incoming links\n";
+    "Usage: vid-downloader [options]\nOptions:\n  -i --input: input url\n  -a --keep-alive: keep handling incoming links (type exit to quit)\n";
   let args: Vec<String> = args().collect();
   let input = parse_input(args);
 
@@ -259,8 +259,11 @@ async fn download_video(browser: &Browser, url: &str) -> Result<(), Box<dyn Erro
 
   tab.navigate_to(url)?;
   let mut found = false;
-  while !found {
+  let mut timeout = 10.0 as f32;
+  while !found && timeout >= 0.0 {
     found = !intercepted_result.lock().unwrap().is_empty();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    timeout -= 0.1;
   }
 
   let master_playlist_url = intercepted_result.lock().unwrap().to_owned();
