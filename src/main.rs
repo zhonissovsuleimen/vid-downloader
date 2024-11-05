@@ -239,12 +239,16 @@ async fn download_video(browser: &Browser, url: &str) -> Result<(), Box<dyn Erro
   tab.enable_request_interception(interceptor)?;
 
   tab.navigate_to(url)?;
-  tab.wait_until_navigated()?;
+  let mut found = false;
+  while !found {
+    found = !intercepted_result.lock().unwrap().is_empty();
+  }
 
   let master_playlist_url = intercepted_result.lock().unwrap().to_owned();
   if master_playlist_url.is_empty() {
     return Err("Failed to find the m3u8 url".into());
   }
+  let _ = tab.close(false);
 
   let media_urls = get_media_playlist_urls(&master_playlist_url).await?;
 
