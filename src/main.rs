@@ -142,7 +142,7 @@ async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, S
         .await
         .unwrap()
         .lines()
-        .filter(|line| line.contains("/ext_tw_video/"))
+        .filter(|line| line.contains("/ext_tw_video/") || line.contains("/amplify_video/"))
         .map(|line| line.to_string())
         .collect();
     }
@@ -170,7 +170,7 @@ async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, S
 async fn get_segment_urls(text: &str) -> Vec<String> {
   text
     .lines()
-    .filter(|line| line.contains("/ext_tw_video/"))
+    .filter(|line| line.contains("/ext_tw_video/") || line.contains("/amplify_video/"))
     .map(|line| {
       let split = line.split('"').filter(|substr| !substr.is_empty());
       let mut result = String::from("https://video.twimg.com");
