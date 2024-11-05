@@ -123,8 +123,13 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
       let request = event.params.request.clone();
 
       if request.url.contains("tag=") && result.lock().unwrap().is_empty() {
-        let mut asd = result.lock().unwrap();
-        *asd = event.params.request.url.to_owned();
+        let mut mutex_guard = result.lock().unwrap();
+        let pure_url = match request.url.find('?') {
+          Some(index) => request.url[..index].to_string(),
+          None => request.url,
+        };
+
+        *mutex_guard = pure_url;
       }
 
       RequestPausedDecision::Continue(None)
@@ -142,7 +147,7 @@ async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, S
         .await
         .unwrap()
         .lines()
-        .filter(|line| line.contains("/ext_tw_video/") || line.contains("/amplify_video/"))
+        .filter(|line| (line.contains("/ext_tw_video/") || line.contains("/amplify_video/")) && !line.contains("TYPE=SUBTITLES") )
         .map(|line| line.to_string())
         .collect();
     }
@@ -252,7 +257,7 @@ async fn download_video(browser: &Browser, url: &str) -> Result<(), Box<dyn Erro
 
   let media_urls = get_media_playlist_urls(&master_playlist_url).await?;
 
-  let id = tokio::task::id();
+  let id = std::process::id();
   let output_name = media_urls.0.split('/').last().unwrap().replace(".m3u8", ".mp4");
   let video_name = format!("video_{}_{}", id, output_name);
   let audio_name = format!("audio_{}_{}", id, output_name);
