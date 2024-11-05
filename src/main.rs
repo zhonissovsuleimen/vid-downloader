@@ -19,7 +19,7 @@ use headless_chrome::{
   protocol::cdp::Target::CreateTarget,
 };
 use headless_chrome::{Browser, LaunchOptions};
-use reqwest;
+use reqwest::Client;
 use tokio::{process::Command, signal};
 
 struct InputArgs {
@@ -174,9 +174,9 @@ async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, S
   let (mut video, mut audio) = (twimg.clone(), twimg.clone());
   match lines.len() > 1 {
     true => {
-      let pure_audio = lines[0].split('"').filter(|substring| !substring.is_empty()).last().unwrap();
+      let pure_audio = lines[lines.len() / 2].split('"').filter(|substring| !substring.is_empty()).last().unwrap();
       audio.push_str(pure_audio);
-      video.push_str(lines[lines.len() / 2].as_str());
+      video.push_str(lines[lines.len() - 1].as_str());
 
       return Ok((video, audio));
     }
@@ -201,12 +201,13 @@ async fn get_segment_urls(text: &str) -> Vec<String> {
     .collect::<Vec<String>>()
 }
 
-fn get_download_tasks(urls: Vec<String>, data: Arc<Mutex<Vec<Vec<u8>>>>) -> Vec<tokio::task::JoinHandle<()>> {
+fn get_download_tasks(client: Arc<Client>, urls: Vec<String>, data: Arc<Mutex<Vec<Vec<u8>>>>) -> Vec<tokio::task::JoinHandle<()>> {
   let mut tasks = Vec::new();
   for (i, url) in urls.into_iter().enumerate() {
     let data = data.clone();
+    let client = client.clone();
     let task = tokio::spawn(async move {
-      let response = reqwest::get(url).await.unwrap();
+      let response = client.get(url).send().await.unwrap();
       let bytes = response.bytes().await.unwrap().to_vec();
       data.lock().unwrap()[i] = bytes;
     });
@@ -226,8 +227,12 @@ async fn download_segments(urls: (String, String)) -> Result<(Vec<u8>, Vec<u8>),
   let video_data = Arc::new(Mutex::new(vec![Vec::new(); video_urls.len()]));
   let audio_data = Arc::new(Mutex::new(vec![Vec::new(); audio_urls.len()]));
 
-  let video_tasks = get_download_tasks(video_urls, video_data.clone());
-  let audio_tasks = get_download_tasks(audio_urls, audio_data.clone());
+  let client = Arc::new(Client::builder()
+    .timeout(Duration::from_secs(10 * 60))
+    .build()?);
+
+  let video_tasks = get_download_tasks(client.clone(), video_urls, video_data.clone());
+  let audio_tasks = get_download_tasks(client.clone(), audio_urls, audio_data.clone());
 
   let all_tasks: Vec<_> = video_tasks.into_iter().chain(audio_tasks.into_iter()).collect();
 
