@@ -20,7 +20,7 @@ use headless_chrome::{
 };
 use headless_chrome::{Browser, LaunchOptions};
 use reqwest;
-use tokio::process::Command;
+use tokio::{process::Command, signal};
 
 struct InputArgs {
   url: String,
@@ -40,7 +40,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
   }
 
   let browser = Arc::new(get_browser()?);
-
+  let browser_process_id = browser.get_process_id();
+  tokio::spawn(async move {
+    let _ = signal::ctrl_c().await;
+    if let Some(pid) = browser_process_id {
+      let _ = Command::new("taskkill").args(&["/F", "/PID", &pid.to_string()]).output().await;
+    }
+  });
+  
   if !input.url.is_empty() {
     let browser_clone = browser.clone();
     match download_video(&browser_clone, &input.url).await {
@@ -60,6 +67,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
       eprintln!("Failed to read line");
       continue;
     }
+    if input_url.trim().to_lowercase() == "exit" {
+      break;
+    }
 
     let browser_clone = browser.clone();
     tokio::spawn(async move {
@@ -73,6 +83,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
       }
     });
+  }
+
+  if let Some(pid) = browser_process_id {
+    let _ = Command::new("taskkill").args(&["/F", "/PID", &pid.to_string()]).output().await?;
   }
   Ok(())
 }
@@ -147,7 +161,7 @@ async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, S
         .await
         .unwrap()
         .lines()
-        .filter(|line| (line.contains("/ext_tw_video/") || line.contains("/amplify_video/")) && !line.contains("TYPE=SUBTITLES") )
+        .filter(|line| (line.contains("/ext_tw_video/") || line.contains("/amplify_video/")) && !line.contains("TYPE=SUBTITLES"))
         .map(|line| line.to_string())
         .collect();
     }
