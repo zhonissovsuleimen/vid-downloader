@@ -7,7 +7,6 @@ use std::{
 };
 
 use reqwest::Client;
-use tokio::process::Command;
 
 use headless_chrome::protocol::cdp::{
   Fetch::{events::RequestPausedEvent, RequestPattern, RequestStage},
@@ -21,6 +20,7 @@ use headless_chrome::{
   protocol::cdp::Target::CreateTarget,
 };
 use headless_chrome::{Browser, LaunchOptions};
+use tokio::process::Command;
 
 struct InputArgs {
   url: String,
@@ -28,7 +28,7 @@ struct InputArgs {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn main() -> Result<(), Box<dyn Error>> {
   const USAGE: &str = "Usage: vid-downloader [options]\nOptions:\n  -i --input: input url\n  -a --keep-alive: keep handling incoming links\n";
   let args: Vec<String> = args().collect();
   let input = parse_input(args);
@@ -49,14 +49,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
   };
 
+  let client = Arc::new(Client::new());
+
   if !input.url.is_empty() {
     let browser_clone = browser.clone();
-    match download_video(&browser_clone, &input.url).await {
+    let client_clone = client.clone();
+    match download_video(&browser_clone, &client_clone, &input.url).await {
       Ok(_) => {
         println!("Successfully downloaded video");
       }
-      Err(_) => {
-        println!("Failed to download video");
+      Err(e) => {
+        println!("Failed to download video: {}", e);
       }
     }
   }
@@ -70,14 +73,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let browser_clone = browser.clone();
+    let client_clone = client.clone();
     tokio::spawn(async move {
       let id = tokio::task::id();
-      match download_video(&browser_clone, &input_url).await {
+      match download_video(&browser_clone, &client_clone, &input_url).await {
         Ok(_) => {
           println!("Task {}: Successfully downloaded video", id);
         }
-        Err(_) => {
-          println!("Task {}: Failed to download video", id);
+        Err(e) => {
+          println!("Task {}: Failed to download video: {}", id, e);
         }
       }
     });
@@ -109,7 +113,7 @@ fn parse_input(args: Vec<String>) -> InputArgs {
   input
 }
 
-fn get_browser() -> Result<Browser, Box<dyn Error + Send + Sync>> {
+fn get_browser() -> Result<Browser, Box<dyn Error>> {
   Ok(Browser::new(LaunchOptions {
     idle_browser_timeout: Duration::from_secs(1e7 as u64),
     args: vec![std::ffi::OsStr::new("--incognito")],
@@ -140,11 +144,12 @@ fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + S
   )
 }
 
-async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+async fn get_media_playlist_urls(
+  client: &Client,
+  master_playlist_url: &str,
+) -> Result<(String, String), Box<dyn Error>> {
   let twimg = String::from("https://video.twimg.com");
   let (mut video, mut audio) = (twimg.clone(), twimg.clone());
-
-  let client = Client::new();
 
   let response = client.get(master_playlist_url).send().await;
 
@@ -183,25 +188,91 @@ async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, S
   }
 }
 
-async fn execute_ffmpeg(urls: (String, String)) -> Result<(), Box<dyn Error + Send + Sync>> {
-  let mut output_name = urls.0.split('/').last().unwrap().split('.').collect::<Vec<&str>>()[0].to_string();
-  output_name.push_str(".mp4");
-  let output = Command::new("ffmpeg")
-    .arg("-y")
-    .args(["-i", &urls.0])
-    .args(["-i", &urls.1])
-    .args(["-c", "copy"])
-    .arg(output_name)
-    .output()
-    .await;
-
-  match output {
-    Ok(output) if output.status.success() => Ok(()),
-    _ => Err("Failed to execute the ffmpeg command".into()),
-  }
+async fn get_segment_urls(text: &str) -> Vec<String> {
+  text
+    .lines()
+    .filter(|line| line.contains("/ext_tw_video/"))
+    .map(|line| {
+      let split = line.split('"').filter(|substr| !substr.is_empty());
+      let mut result = String::from("https://video.twimg.com");
+      if let Some(url) = split.last() {
+        result.push_str(url);
+      }
+      result
+    })
+    .collect::<Vec<String>>()
 }
 
-async fn download_video(browser: &Browser, url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn download_segments(client: &Client, urls: (String, String)) -> Result<(Vec<u8>, Vec<u8>), Box<dyn Error>> {
+  let video_text;
+  let audio_text;
+
+  match client.get(urls.0).send().await {
+    Ok(response) => {
+      video_text = response.text().await.unwrap();
+    }
+    Err(_) => return Err("Failed to get video segments".into()),
+  }
+  match client.get(urls.1).send().await {
+    Ok(response) => {
+      audio_text = response.text().await.unwrap();
+    }
+    Err(_) => return Err("Failed to get audio segments".into()),
+  }
+
+  let video_urls = get_segment_urls(&video_text).await;
+  let audio_urls = get_segment_urls(&audio_text).await;
+
+  let video_data = Arc::new(Mutex::new({
+    let mut v = Vec::with_capacity(video_urls.len());
+    v.extend((0..video_urls.len()).map(|_| Vec::new()));
+    v
+  }));
+  
+  let audio_data = Arc::new(Mutex::new({
+    let mut v = Vec::with_capacity(audio_urls.len());
+    v.extend((0..audio_urls.len()).map(|_| Vec::new()));
+    v
+  }));
+
+  let video_task = {
+    let client = client.clone();
+    let video_data = video_data.clone();
+    tokio::spawn(async move {
+      for (i, url) in video_urls.into_iter().enumerate() {
+        let response = client.get(url).send().await.unwrap();
+        let data = response.bytes().await.unwrap().to_vec();
+        video_data.lock().unwrap()[i] = data;
+      }
+    })
+  };
+
+  if video_task.await.is_err() {
+    return Err("Failed to download video segments".into());
+  }
+
+  let audio_task = {
+    let client = client.clone();
+    let audio_data = audio_data.clone();
+    tokio::spawn(async move {
+      for (i, url) in audio_urls.into_iter().enumerate() {
+        let response = client.get(url).send().await.unwrap();
+        let data = response.bytes().await.unwrap().to_vec();
+        audio_data.lock().unwrap()[i] = data;
+      }
+    })
+  };
+
+  if audio_task.await.is_err() {
+    return Err("Failed to download audio segments".into());
+  }
+
+  let video_data = Arc::try_unwrap(video_data).unwrap().into_inner().unwrap().concat();
+  let audio_data = Arc::try_unwrap(audio_data).unwrap().into_inner().unwrap().concat();
+  Ok((video_data, audio_data))
+}
+
+async fn download_video(browser: &Browser, client: &Client, url: &str) -> Result<(), Box<dyn Error>> {
   let target = CreateTarget {
     url: "about::blank".to_string(),
     width: None,
@@ -246,19 +317,44 @@ async fn download_video(browser: &Browser, url: &str) -> Result<(), Box<dyn Erro
     return Err("Failed to find the m3u8 url".into());
   }
 
-  match get_media_playlist_urls(&master_playlist_url).await {
+  let mut media_urls = (String::new(), String::new());
+  match get_media_playlist_urls(client, &master_playlist_url).await {
     Ok(result) => {
-      if execute_ffmpeg(result).await.is_err() {
-        return Err("Failed to download the video".into());
-      }
+      media_urls.0.push_str(&result.0);
+      media_urls.1.push_str(&result.1);
     }
     Err(_) => {
       return Err("Failed to close the tab".into());
     }
   }
+  let id = tokio::task::id();
+  let output_name = media_urls.0.split('/').last().unwrap().replace(".m3u8", ".mp4");
+  let video_name = format!("video_{}_{}", id, output_name);
+  let audio_name = format!("audio_{}_{}", id, output_name);
+  
+  let segments = match download_segments(client, media_urls.clone()).await {
+    Ok(segments) => segments,
+    Err(_) => {
+      return Err(format!("Failed to download segments").into());
+    }
+  };
+  tokio::fs::write(video_name.clone(), segments.0).await?;
+  tokio::fs::write(audio_name.clone(), segments.1).await?;
 
-  if tab.close(false).is_err() {
-    return Err("Failed to close the tab".into());
+  let output = Command::new("ffmpeg")
+    .args(&["-i", &video_name])
+    .args(&["-i", &audio_name])
+    .args(["-c", "copy"])
+    .arg("-y")
+    .arg(&output_name)
+    .output().await;
+
+  std::fs::remove_file(video_name)?;
+  std::fs::remove_file(audio_name)?;
+  
+  if output.is_err() || !output.unwrap().status.success() {
+    return Err("Failed to merge video and audio segments".into());
   }
+
   Ok(())
 }
