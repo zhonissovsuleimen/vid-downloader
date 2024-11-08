@@ -174,7 +174,7 @@ async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, S
   let (mut video, mut audio) = (twimg.clone(), twimg.clone());
   match lines.len() > 1 {
     true => {
-      let pure_audio = lines[lines.len() / 2].split('"').filter(|substring| !substring.is_empty()).last().unwrap();
+      let pure_audio = lines[(lines.len() / 2) - 1].split('"').filter(|substring| !substring.is_empty()).last().unwrap();
       audio.push_str(pure_audio);
       video.push_str(lines[lines.len() - 1].as_str());
 
