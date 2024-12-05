@@ -5,6 +5,11 @@ use tokio::{
   process::Command
 };
 
+enum Platform {
+  Twitter,
+  Other
+}
+
 enum DownloaderError {
   InvalidInput,
   UnsupportedPlatform

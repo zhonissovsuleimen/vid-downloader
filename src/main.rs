@@ -27,10 +27,6 @@ struct InputArgs {
   keep_alive: bool,
 }
 
-enum Platform {
-  Twitter,
-  Other
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
