@@ -22,6 +22,9 @@ use headless_chrome::{Browser, LaunchOptions};
 use reqwest::Client;
 use tokio::{process::Command, signal};
 
+mod downloader;
+mod downloader_error;
+
 struct InputArgs {
   url: String,
   keep_alive: bool,
