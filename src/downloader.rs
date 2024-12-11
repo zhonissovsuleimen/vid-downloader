@@ -16,7 +16,7 @@ use std::{
   sync::{Arc, Mutex},
   time::Duration,
 };
-use tokio::{fs::File, process::Command, signal};
+use tokio::{process::Command, signal};
 
 use crate::downloader_error::DownloaderError;
 
@@ -82,7 +82,7 @@ impl Downloader {
     )
   }
 
-  pub async fn download(&self, url: &str) -> Result<File, DownloaderError> {
+  pub async fn download(&self, url: &str) -> Result<String, DownloaderError> {
     validate_url(url)?;
 
     let target = CreateTarget {
