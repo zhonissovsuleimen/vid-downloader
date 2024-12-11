@@ -9,7 +9,7 @@ use headless_chrome::{
     Network::ResourceType,
     Target::CreateTarget,
   },
-  Browser,
+  Browser, LaunchOptions,
 };
 use reqwest::Client;
 use std::{
@@ -34,7 +34,11 @@ pub struct Downloader {
 
 impl Downloader {
   pub fn new() -> Self {
-    let browser = Arc::new(Browser::default().unwrap());
+    let browser = Arc::new(Browser::new(LaunchOptions {
+      idle_browser_timeout: Duration::from_secs(1e7 as u64),
+      args: vec![std::ffi::OsStr::new("--incognito")],
+      ..Default::default()
+    }).unwrap());
     let process_id = browser.get_process_id().unwrap();
     let video_pattern = RequestPattern {
       url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
