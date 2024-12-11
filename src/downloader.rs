@@ -79,6 +79,8 @@ impl Downloader {
   }
 
   pub async fn download(&self, url: &str) -> Result<File, DownloaderError> {
+    validate_url(url)?;
+
     let target = CreateTarget {
       url: "about::blank".to_string(),
       width: None,
@@ -141,6 +143,20 @@ impl Downloader {
     let output_file = File::open(output_name).await.map_err(|_| DownloaderError::IOError)?;
     Ok(output_file)
   }
+}
+
+fn validate_url(url: &str) -> Result<(), DownloaderError> {
+  if url.is_empty() || !url.starts_with("https://") {
+    return Err(DownloaderError::InvalidInputError);
+  }
+
+  let twitter_regex = regex::Regex::new(r"https://(twitter|x).com/.+/status/\d+").unwrap();
+
+  if !twitter_regex.is_match(url) {
+    return Err(DownloaderError::UnsupportedPlatformError);
+  }
+
+  Ok(())
 }
 
 async fn get_media_playlist_urls(master_playlist_url: &str) -> Result<(String, String), DownloaderError> {

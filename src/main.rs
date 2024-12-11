@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
   const USAGE: &str = "Usage: vid-downloader [options]\n\
     Options:\n  -i --input: input url\n\
-      -a --keep-alive: keep handling incoming links (type exit to quit)\n\
+    -a --keep-alive: keep handling incoming links (type exit to quit)\n\
     ";
 
   let args: Vec<String> = args().collect();
@@ -30,16 +30,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("{}", USAGE);
     return Ok(());
   }
-  
-  if !input.url.is_empty() {
-    // match test.down;
-    match downloader.download(&input.url).await {
-      Ok(_) => {
-        println!("Successfully downloaded video");
-      }
-      Err(e) => {
-        println!("Failed to download video: {}", e);
-      }
+
+  match downloader.download(&input.url).await {
+    Ok(_) => {
+      println!("Successfully downloaded video");
+    }
+    Err(e) => {
+      println!("Failed to download video: {}", e);
     }
   }
 
