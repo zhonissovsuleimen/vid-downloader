@@ -7,7 +7,7 @@ pub enum DownloaderError {
   MediaPlaylistExtractError,
   IOError,
   FfmpegError,
-  OtherError(String)
+  OtherError(String),
 }
 
 impl From<anyhow::Error> for DownloaderError {
@@ -16,7 +16,7 @@ impl From<anyhow::Error> for DownloaderError {
   }
 }
 
-impl Display for DownloaderError{
+impl Display for DownloaderError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       DownloaderError::InvalidInputError => write!(f, "Invalid input"),
@@ -25,7 +25,7 @@ impl Display for DownloaderError{
       DownloaderError::MediaPlaylistExtractError => write!(f, "Failed to extract media playlist"),
       DownloaderError::IOError => write!(f, "Failed to perform IO operation"),
       DownloaderError::FfmpegError => write!(f, "Failed to execute ffmpeg command"),
-      DownloaderError::OtherError(e) => write!(f, "Error: {}", e)
+      DownloaderError::OtherError(e) => write!(f, "Error: {}", e),
     }
   }
 }

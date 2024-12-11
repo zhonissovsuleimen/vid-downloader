@@ -2,10 +2,8 @@ use std::{
   env::args,
   error::Error,
   io::{self, Write},
-  time::Duration,
 };
 
-use headless_chrome::{Browser, LaunchOptions};
 use downloader::Downloader;
 
 mod downloader;
@@ -16,13 +14,11 @@ struct InputArgs {
   keep_alive: bool,
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
   let downloader = Downloader::new();
 
-  const USAGE: &str =
-    "Usage: vid-downloader [options]\n\
+  const USAGE: &str = "Usage: vid-downloader [options]\n\
     Options:\n  -i --input: input url\n\
       -a --keep-alive: keep handling incoming links (type exit to quit)\n\
     ";
@@ -57,7 +53,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if input_url.trim().to_lowercase() == "exit" {
       break;
     }
-
 
     match downloader.download(&input.url).await {
       Ok(_) => {
@@ -94,12 +89,4 @@ fn parse_input(args: Vec<String>) -> InputArgs {
   }
 
   input
-}
-
-fn get_browser() -> Result<Browser, Box<dyn Error>> {
-  Ok(Browser::new(LaunchOptions {
-    idle_browser_timeout: Duration::from_secs(1e7 as u64),
-    args: vec![std::ffi::OsStr::new("--incognito")],
-    ..Default::default()
-  })?)
 }

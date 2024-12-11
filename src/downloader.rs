@@ -78,7 +78,7 @@ impl Downloader {
     )
   }
 
-  pub async fn download(&self, url: &str) -> Result<(File), DownloaderError> {
+  pub async fn download(&self, url: &str) -> Result<File, DownloaderError> {
     let target = CreateTarget {
       url: "about::blank".to_string(),
       width: None,
@@ -118,10 +118,14 @@ impl Downloader {
 
     let segments = download_segments(media_urls.clone()).await?;
 
-    tokio::fs::write(video_name.clone(), segments.0).await.map_err(|_| DownloaderError::IOError)?;
-    tokio::fs::write(audio_name.clone(), segments.1).await.map_err(|_| DownloaderError::IOError)?;
+    tokio::fs::write(video_name.clone(), segments.0)
+      .await
+      .map_err(|_| DownloaderError::IOError)?;
+    tokio::fs::write(audio_name.clone(), segments.1)
+      .await
+      .map_err(|_| DownloaderError::IOError)?;
 
-    let ffmpeg = Command::new("ffmpeg")
+    Command::new("ffmpeg")
       .args(&["-i", &video_name])
       .args(&["-i", &audio_name])
       .args(["-c", "copy"])
@@ -129,7 +133,7 @@ impl Downloader {
       .arg(&output_name)
       .output()
       .await
-      .map_err(|e| DownloaderError::FfmpegError)?;
+      .map_err(|_| DownloaderError::FfmpegError)?;
 
     tokio::fs::remove_file(video_name).await.map_err(|_| DownloaderError::IOError)?;
     tokio::fs::remove_file(audio_name).await.map_err(|_| DownloaderError::IOError)?;
