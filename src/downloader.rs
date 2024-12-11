@@ -32,6 +32,14 @@ pub struct Downloader {
   request_patterns: Vec<RequestPattern>,
 }
 
+impl Drop for Downloader {
+  fn drop(&mut self) {
+    let _ = Command::new("taskkill")
+      .args(&["/F", "/PID", &self.process_id.to_string()])
+      .output();
+  }
+}
+
 impl Downloader {
   pub fn new() -> Self {
     let browser = Arc::new(Browser::new(LaunchOptions {
