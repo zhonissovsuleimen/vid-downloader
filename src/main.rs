@@ -1,10 +1,11 @@
 use std::{
   env::args,
   error::Error,
-  io::{self, Write},
+  io::{self, Write}, sync::Arc,
 };
 
 use downloader::Downloader;
+use tokio::sync::Mutex;
 
 mod downloader;
 mod downloader_error;
@@ -16,7 +17,7 @@ struct InputArgs {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-  let downloader = Downloader::new();
+  let downloader = Arc::new(Mutex::new(Downloader::new()));
 
   const USAGE: &str = "Usage: vid-downloader [options]\n\
     Options:\n\
@@ -25,41 +26,49 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ";
 
   let args: Vec<String> = args().collect();
-  let input = parse_input(args);
-
-  if input.url.is_empty() && !input.keep_alive {
+  if !(args.contains(&String::from("-a")) || args.contains(&String::from("-i"))) { 
     println!("{}", USAGE);
     return Ok(());
   }
 
-  match downloader.download(&input.url).await {
-    Ok(_) => {
-      println!("Successfully downloaded video");
-    }
-    Err(e) => {
-      println!("Failed to download video: {}", e);
-    }
+  let input = parse_input(args);
+  if !input.keep_alive {
+    let downloader_clone = downloader.clone();
+    tokio::spawn(async move {
+      match downloader_clone.lock().await.download(&input.url).await {
+        Ok(_) => {
+          println!("Successfully downloaded video");
+        }
+        Err(e) => {
+          println!("Failed to download video: {}", e);
+        }
+      }
+    });
   }
 
   while input.keep_alive {
-    let mut input_url = String::new();
+    let mut new_url = String::new();
     io::stdout().flush().unwrap();
-    if io::stdin().read_line(&mut input_url).is_err() {
+    if io::stdin().read_line(&mut new_url).is_err() {
       eprintln!("Failed to read line");
       continue;
     }
-    if input_url.trim().to_lowercase() == "exit" {
+    if new_url.trim().to_lowercase() == "exit" {
       break;
     }
 
-    match downloader.download(&input.url).await {
-      Ok(_) => {
-        println!("Successfully downloaded video");
+    let downloader_clone = downloader.clone();
+    tokio::spawn(async move {
+      match downloader_clone.lock().await.download(&new_url).await {
+        Ok(_) => {
+          println!("Successfully downloaded video");
+        }
+        Err(e) => {
+          println!("Failed to download video: {}", e);
+        }
       }
-      Err(e) => {
-        println!("Failed to download video: {}", e);
-      }
-    }
+    });
+    
   }
 
   Ok(())
