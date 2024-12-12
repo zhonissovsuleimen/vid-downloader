@@ -19,7 +19,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let downloader = Downloader::new();
 
   const USAGE: &str = "Usage: vid-downloader [options]\n\
-    Options:\n  -i --input: input url\n\
+    Options:\n\
+    -i --input: input url\n\
     -a --keep-alive: keep handling incoming links (type exit to quit)\n\
     ";
 
