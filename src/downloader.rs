@@ -18,6 +18,12 @@ use std::{
 };
 use tokio::{process::Command, signal};
 
+use winapi::um::jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject};
+use winapi::um::winnt::{JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE};
+use winapi::um::processthreadsapi::OpenProcess;
+use winapi::um::handleapi::CloseHandle;
+use std::ptr::null_mut;
+
 use crate::downloader_error::DownloaderError;
 
 enum Platform {
@@ -51,6 +57,32 @@ impl Downloader {
       .unwrap(),
     );
     let process_id = browser.get_process_id().unwrap();
+
+    // Assign the browser process to a Job Object
+    unsafe {
+      let h_job = CreateJobObjectW(null_mut(), null_mut());
+      let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+        BasicLimitInformation: std::mem::zeroed(),
+        IoInfo: std::mem::zeroed(),
+        ProcessMemoryLimit: 0,
+        JobMemoryLimit: 0,
+        PeakProcessMemoryUsed: 0,
+        PeakJobMemoryUsed: 0,
+      };
+      info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      SetInformationJobObject(
+        h_job,
+        JobObjectExtendedLimitInformation,
+        &mut info as *mut _ as *mut _,
+        std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+      );
+
+      let process_handle = OpenProcess(0x001F0FFF, 0, process_id);
+      AssignProcessToJobObject(h_job, process_handle);
+      // Close the process handle when done
+      CloseHandle(process_handle);
+    }
+
     let video_pattern = RequestPattern {
       url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
       resource_Type: Some(ResourceType::Xhr),
