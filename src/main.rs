@@ -1,7 +1,8 @@
 use std::{
   env::args,
   error::Error,
-  io::{self, Write}, sync::Arc,
+  io::{self, Write},
+  sync::Arc,
 };
 
 use downloader::Downloader;
@@ -26,7 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ";
 
   let args: Vec<String> = args().collect();
-  if !(args.contains(&String::from("-a")) || args.contains(&String::from("-i"))) { 
+  if !(args.contains(&String::from("-a")) || args.contains(&String::from("-i"))) {
     println!("{}", USAGE);
     return Ok(());
   }
@@ -34,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
   let input = parse_input(args);
   if !input.keep_alive {
     let downloader_clone = downloader.clone();
-    tokio::spawn(async move {
+    let _ = tokio::spawn(async move {
       match downloader_clone.lock().await.download(&input.url).await {
         Ok(_) => {
           println!("Successfully downloaded video");
@@ -43,7 +44,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
           println!("Failed to download video: {}", e);
         }
       }
-    });
+    })
+    .await;
   }
 
   while input.keep_alive {
@@ -68,7 +70,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
       }
     });
-    
   }
 
   Ok(())
