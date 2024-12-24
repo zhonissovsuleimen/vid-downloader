@@ -18,12 +18,6 @@ use std::{
 };
 use tokio::{process::Command, signal};
 
-use winapi::um::jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject};
-use winapi::um::winnt::{JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE};
-use winapi::um::processthreadsapi::OpenProcess;
-use winapi::um::handleapi::CloseHandle;
-use std::ptr::null_mut;
-
 use crate::downloader_error::DownloaderError;
 
 enum Platform {
@@ -58,8 +52,16 @@ impl Downloader {
     );
     let process_id = browser.get_process_id().unwrap();
 
-    // Assign the browser process to a Job Object
+    #[cfg(target_os = "windows")]
     unsafe {
+      use std::ptr::null_mut;
+      use winapi::um::handleapi::CloseHandle;
+      use winapi::um::jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject};
+      use winapi::um::processthreadsapi::OpenProcess;
+      use winapi::um::winnt::{
+        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+      };
+
       let h_job = CreateJobObjectW(null_mut(), null_mut());
       let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
         BasicLimitInformation: std::mem::zeroed(),
