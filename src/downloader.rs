@@ -27,17 +27,8 @@ enum Platform {
 
 pub struct Downloader {
   browser: Arc<Browser>,
-  process_id: u32,
 
   request_patterns: Vec<RequestPattern>,
-}
-
-impl Drop for Downloader {
-  fn drop(&mut self) {
-    let _ = Command::new("taskkill")
-      .args(&["/F", "/PID", &self.process_id.to_string()])
-      .output();
-  }
 }
 
 impl Downloader {
@@ -52,6 +43,7 @@ impl Downloader {
     );
     let process_id = browser.get_process_id().unwrap();
 
+    //hopefully killing the browser if the terminal is terminated unexpectedly
     #[cfg(target_os = "windows")]
     unsafe {
       use std::ptr::null_mut;
@@ -84,6 +76,17 @@ impl Downloader {
       // Close the process handle when done
       CloseHandle(process_handle);
     }
+    #[cfg(target_os = "linux")]
+    {
+      tokio::spawn(async move {
+        info!("Waiting for ctrl-c command to kill browser");
+        let _ = signal::ctrl_c().await;
+        info!("Received ctrl-c command, killing browser");
+        {
+          let _ = Command::new("kill").args(&["-9", &process_id.to_string()]).output().await;
+        }
+      });
+    }
 
     let video_pattern = RequestPattern {
       url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
@@ -91,18 +94,8 @@ impl Downloader {
       request_stage: Some(RequestStage::Request),
     };
 
-    //spawn task that kills the browser when ctr-c command is issued
-    tokio::spawn(async move {
-      let _ = signal::ctrl_c().await;
-      let _ = Command::new("taskkill")
-        .args(&["/F", "/PID", &process_id.to_string()])
-        .output()
-        .await;
-    });
-
     Self {
       browser: browser,
-      process_id: process_id,
       request_patterns: vec![video_pattern],
     }
   }
