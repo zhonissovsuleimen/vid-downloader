@@ -5,11 +5,12 @@ use std::{
   sync::Arc,
 };
 use tokio::sync::Mutex;
-
-mod downloader;
 use downloader::Downloader;
 use tracing_subscriber::fmt::format::FmtSpan;
+
+mod downloader;
 mod downloader_error;
+mod playlist;
 
 struct InputArgs {
   url: String,
@@ -71,10 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn parse_input(args: Vec<String>) -> InputArgs {
-  let mut input = InputArgs {
-    url: String::new(),
-    keep_alive: false,
-  };
+  let mut input = InputArgs { url: String::new(), keep_alive: false };
 
   let mut i = 1;
   while i < args.len() {
