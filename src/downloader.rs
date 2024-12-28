@@ -156,7 +156,7 @@ impl Downloader {
     let _ = tab.close(false);
 
     let variant_playlist_url = intercepted_result.lock().unwrap().to_owned();
-    let variant_playlist = variant_playlist::VariantPlaylist::from_url(&variant_playlist_url).await.map_err(|_| DownloaderError::FetchError)?;
+    let mut variant_playlist = variant_playlist::VariantPlaylist::from_url(&variant_playlist_url).await.map_err(|_| DownloaderError::FetchError)?;
 
     if variant_playlist.master_playlists.is_empty() {
       return Err(DownloaderError::NoMasterPlaylistError);
@@ -167,7 +167,7 @@ impl Downloader {
       PreferredResolution::Low => variant_playlist.master_playlists.len() - 1,
     };
 
-    variant_playlist.master_playlists[resolution_index].write().await
+    variant_playlist.master_playlists[resolution_index].download().await
   }
 
   pub fn set_preferred_resolution(&mut self, resolution: PreferredResolution) {
