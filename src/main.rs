@@ -5,7 +5,7 @@ use std::{
   sync::Arc,
 };
 use tokio::sync::Mutex;
-use downloader::Downloader;
+use downloader::{Downloader, PreferredResolution};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 mod downloader;
@@ -15,6 +15,7 @@ mod playlist;
 struct InputArgs {
   url: String,
   keep_alive: bool,
+  resolution: PreferredResolution,
 }
 
 #[tokio::main]
@@ -46,6 +47,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
   }
 
   let input = parse_input(args);
+  downloader.lock().await.set_preferred_resolution(input.resolution);
   if !input.keep_alive {
     let downloader_clone = downloader.clone();
     let _ = tokio::spawn(async move { downloader_clone.lock().await.download(&input.url).await }).await;
@@ -72,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn parse_input(args: Vec<String>) -> InputArgs {
-  let mut input = InputArgs { url: String::new(), keep_alive: false };
+  let mut input = InputArgs { url: String::new(), keep_alive: false, resolution: PreferredResolution::High };
 
   let mut i = 1;
   while i < args.len() {
@@ -83,6 +85,15 @@ fn parse_input(args: Vec<String>) -> InputArgs {
       }
       "--keep-alive" | "-a" => {
         input.keep_alive = true;
+      }
+      "--high" | "-h" => {
+        input.resolution = PreferredResolution::High;
+      }
+      "--medium" | "-m" => {
+        input.resolution = PreferredResolution::Medium;
+      }
+      "--low" | "-l" => {
+        input.resolution = PreferredResolution::Low;
       }
       _ => {}
     }

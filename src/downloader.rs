@@ -23,10 +23,17 @@ enum Platform {
   Other,
 }
 
+pub enum PreferredResolution {
+  High,
+  Medium,
+  Low,
+}
+
+
 pub struct Downloader {
   browser: Arc<Browser>,
-
   request_patterns: Vec<RequestPattern>,
+  resolution: PreferredResolution, 
 }
 
 impl Downloader {
@@ -92,7 +99,7 @@ impl Downloader {
       request_stage: Some(RequestStage::Request),
     };
 
-    Self { browser: browser, request_patterns: vec![video_pattern] }
+    Self { browser: browser, request_patterns: vec![video_pattern], resolution: PreferredResolution::High }
   }
 
   fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
@@ -154,8 +161,17 @@ impl Downloader {
     if variant_playlist.master_playlists.is_empty() {
       return Err(DownloaderError::NoMasterPlaylistError);
     }
+    let resolution_index = match self.resolution {
+      PreferredResolution::High => 0,
+      PreferredResolution::Medium => variant_playlist.master_playlists.len() / 2,
+      PreferredResolution::Low => variant_playlist.master_playlists.len() - 1,
+    };
 
-    variant_playlist.master_playlists[0].write().await
+    variant_playlist.master_playlists[resolution_index].write().await
+  }
+
+  pub fn set_preferred_resolution(&mut self, resolution: PreferredResolution) {
+    self.resolution = resolution;
   }
 }
 
