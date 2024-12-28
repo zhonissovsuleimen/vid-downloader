@@ -27,9 +27,15 @@ impl MasterPlaylist {
     let video_bytes = self.video_media_playlist.get_byte_data();
     let audio_bytes = self.audio_media_playlist.get_byte_data();
 
-    let video_name = self.video_media_playlist.name.split('/').last().unwrap().to_string();
-    let audio_name = self.audio_media_playlist.name.split('/').last().unwrap().to_string();
-    let output_name = format!("{}_{}.mp4", video_name.replace(".m3u8", ""), self.resolution);
+    let video_name = self.video_media_playlist.name
+      .split('/').last().unwrap()
+      .split('.').next().unwrap()
+      .to_string();
+    let audio_name = self.audio_media_playlist.name
+      .split('/').last().unwrap()
+      .split('.').next().unwrap() 
+      .to_string();
+    let output_name = format!("{}_{}.mp4", video_name, self.resolution);
     info!("Downloading video {} with resolution: {}", output_name, self.resolution);
 
     tokio::fs::write(video_name.clone(), video_bytes).await.map_err(|_| DownloaderError::IOError)?;
