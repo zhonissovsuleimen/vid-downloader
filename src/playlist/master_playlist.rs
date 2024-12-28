@@ -14,8 +14,6 @@ pub struct MasterPlaylist {
 
 impl MasterPlaylist {
   pub async fn from_urls(video_url: &str, audio_url: &str) -> Result<Self, DownloaderError> {
-    info!("Fetching master playlist from: {} and {}", video_url, audio_url);
-
     Ok(MasterPlaylist {
       resolution: String::new(),
       video_media_playlist: None,
@@ -26,6 +24,8 @@ impl MasterPlaylist {
   }
 
   pub async fn download(&mut self) -> Result<String, DownloaderError> {
+    info!("Downloading video with urls: {} and {}", self.video_media_url, self.audio_media_url);
+
     self.video_media_playlist = Some(MediaPlaylist::from_url(&self.video_media_url).await?);
     self.audio_media_playlist = Some(MediaPlaylist::from_url(&self.audio_media_url).await?);
     let video_media_playlist = self.video_media_playlist.as_ref().unwrap();

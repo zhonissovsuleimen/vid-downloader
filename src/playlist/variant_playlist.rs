@@ -11,7 +11,7 @@ pub struct VariantPlaylist {
 
 impl VariantPlaylist {
   pub async fn from_url(url: &str) -> Result<Self, DownloaderError> {
-    info!("Fetching variant playlist from: {}", url);
+    info!("Fetching variant playlist from: {url}");
     const BASE_URL: &str = "https://video.twimg.com";
     struct ParsedOutput {
       video_url: Option<String>,

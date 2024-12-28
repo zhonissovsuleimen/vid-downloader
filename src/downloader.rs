@@ -121,9 +121,8 @@ impl Downloader {
   }
 
   pub async fn download(&self, url: &str) -> Result<String, DownloaderError> {
-    info!("Recieved download call for {url}");
+    info!("Recieved download call: {url}");
 
-    info!("Validating url");
     validate_url(url)?;
 
     let target = CreateTarget {
@@ -176,6 +175,7 @@ impl Downloader {
 }
 
 fn validate_url(url: &str) -> Result<(), DownloaderError> {
+  info!("Validating url: {url}");
   if url.is_empty() || !url.starts_with("https://") {
     return Err(DownloaderError::InvalidInputError);
   }
@@ -186,5 +186,6 @@ fn validate_url(url: &str) -> Result<(), DownloaderError> {
     return Err(DownloaderError::UnsupportedPlatformError);
   }
 
+  info!("Url validated: {url}");
   Ok(())
 }
