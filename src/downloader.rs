@@ -16,24 +16,19 @@ use std::{
 };
 use tracing::info;
 
-use crate::{downloader_error::DownloaderError, playlist::variant_playlist};
+use crate::{
+  downloader_error::DownloaderError,
+  playlist::variant_playlist::{self, VariantPlaylist},
+};
 
 enum Platform {
   Twitter,
   Other,
 }
 
-pub enum PreferredResolution {
-  High,
-  Medium,
-  Low,
-}
-
-
 pub struct Downloader {
   browser: Arc<Browser>,
   request_patterns: Vec<RequestPattern>,
-  resolution: PreferredResolution, 
 }
 
 impl Downloader {
@@ -99,7 +94,7 @@ impl Downloader {
       request_stage: Some(RequestStage::Request),
     };
 
-    Self { browser: browser, request_patterns: vec![video_pattern], resolution: PreferredResolution::High }
+    Self { browser: browser, request_patterns: vec![video_pattern] }
   }
 
   fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
@@ -120,7 +115,7 @@ impl Downloader {
     })
   }
 
-  pub async fn download(&self, url: &str) -> Result<String, DownloaderError> {
+  pub async fn get_variant_playlist(&self, url: &str) -> Result<VariantPlaylist, DownloaderError> {
     info!("Recieved download call: {url}");
 
     validate_url(url)?;
@@ -155,22 +150,7 @@ impl Downloader {
     let _ = tab.close(false);
 
     let variant_playlist_url = intercepted_result.lock().unwrap().to_owned();
-    let mut variant_playlist = variant_playlist::VariantPlaylist::from_url(&variant_playlist_url).await.map_err(|_| DownloaderError::FetchError)?;
-
-    if variant_playlist.master_playlists.is_empty() {
-      return Err(DownloaderError::NoMasterPlaylistError);
-    }
-    let resolution_index = match self.resolution {
-      PreferredResolution::High => 0,
-      PreferredResolution::Medium => variant_playlist.master_playlists.len() / 2,
-      PreferredResolution::Low => variant_playlist.master_playlists.len() - 1,
-    };
-
-    variant_playlist.master_playlists[resolution_index].download().await
-  }
-
-  pub fn set_preferred_resolution(&mut self, resolution: PreferredResolution) {
-    self.resolution = resolution;
+    VariantPlaylist::from_url(&variant_playlist_url).await
   }
 }
 
