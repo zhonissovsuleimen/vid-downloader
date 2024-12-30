@@ -3,7 +3,10 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::{downloader_error::DownloaderError, platforms::twitter::TwitterDownloader};
+use crate::{
+  downloader_error::DownloaderError,
+  platforms::{tiktok::TiktokDownloader, twitter::TwitterDownloader},
+};
 
 #[derive(Clone)]
 pub enum PreferredResolution {
@@ -26,10 +29,10 @@ pub struct Downloader {
 impl Downloader {
   pub fn new() -> Self {
     let browser = Browser::new(LaunchOptions {
-        idle_browser_timeout: Duration::from_secs(1e7 as u64),
-        args: vec![std::ffi::OsStr::new("--incognito")],
-        ..Default::default()
-      })
+      idle_browser_timeout: Duration::from_secs(1e7 as u64),
+      args: vec![std::ffi::OsStr::new("--incognito")],
+      ..Default::default()
+    })
     .unwrap();
     let process_id = browser.get_process_id().unwrap();
 
@@ -84,16 +87,26 @@ impl Downloader {
   pub async fn download(&self, url: &str, preferred_resolution: Option<PreferredResolution>) -> Result<String, DownloaderError> {
     info!("Recieved download call: {url}");
 
-    match url {
-      _ if TwitterDownloader::validate_url(url).is_ok() => {
-        TwitterDownloader::download(self.browser.clone(), url, preferred_resolution).await
-      },
-      _ if Self::is_url(url) => {
-        Err(DownloaderError::UnsupportedPlatformError)
-      },
-      _ => {
-        Err(DownloaderError::InvalidInputError)
-      },
+    if !Self::is_url(url) {
+      return Err(DownloaderError::InvalidInputError);
+    }
+
+    let browser_clone = self.browser.clone();
+    let result = match url {
+      _ if TwitterDownloader::validate_url(url).is_ok() => TwitterDownloader::download(browser_clone, url, preferred_resolution).await,
+      _ if TiktokDownloader::validate_url(url).is_ok() => TiktokDownloader::download(browser_clone, url, preferred_resolution).await,
+      _ => Err(DownloaderError::UnsupportedPlatformError),
+    };
+
+    match result {
+      Ok(output) => {
+        info!("Downloaded completed for url: {url}");
+        Ok(output)
+      }
+      Err(e) => {
+        info!("Download failed for url: {url}");
+        Err(e)
+      }
     }
   }
 
