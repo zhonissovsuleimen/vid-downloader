@@ -1,5 +1,6 @@
 use headless_chrome::{Browser, LaunchOptions};
 use std::{sync::Arc, time::Duration};
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::{downloader_error::DownloaderError, platforms::twitter::TwitterDownloader};
@@ -13,25 +14,23 @@ pub enum PreferredResolution {
 
 pub trait PlatformDownloader {
   async fn download(
-    browser: Arc<Browser>, url: &str, preferred_resolution: Option<PreferredResolution>,
+    browser: Arc<Mutex<Browser>>, url: &str, preferred_resolution: Option<PreferredResolution>,
   ) -> Result<String, DownloaderError>;
   fn validate_url(url: &str) -> Result<(), DownloaderError>;
 }
 
 pub struct Downloader {
-  browser: Arc<Browser>,
+  browser: Arc<Mutex<Browser>>,
 }
 
 impl Downloader {
   pub fn new() -> Self {
-    let browser = Arc::new(
-      Browser::new(LaunchOptions {
+    let browser = Browser::new(LaunchOptions {
         idle_browser_timeout: Duration::from_secs(1e7 as u64),
         args: vec![std::ffi::OsStr::new("--incognito")],
         ..Default::default()
       })
-      .unwrap(),
-    );
+    .unwrap();
     let process_id = browser.get_process_id().unwrap();
 
     //hopefully killing the browser if the terminal is terminated unexpectedly
@@ -79,7 +78,7 @@ impl Downloader {
       });
     }
 
-    Self { browser: browser }
+    Self { browser: Arc::new(Mutex::new(browser)) }
   }
 
   pub async fn download(&self, url: &str, preferred_resolution: Option<PreferredResolution>) -> Result<String, DownloaderError> {

@@ -1,3 +1,4 @@
+use downloader::{Downloader, PreferredResolution};
 use std::{
   env::args,
   error::Error,
@@ -5,14 +6,12 @@ use std::{
   sync::Arc,
 };
 use tokio::sync::Mutex;
-use downloader::{Downloader, PreferredResolution};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 mod downloader;
 mod downloader_error;
-mod playlist;
 mod platforms;
-
+mod playlist;
 
 struct InputArgs {
   url: String,
@@ -34,21 +33,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .with_thread_names(false)
     .init();
 
-  let downloader = Arc::new(Mutex::new(Downloader::new()));
-
-  const USAGE: &str = "Usage: vid-downloader [options]\n\
+  let args: Vec<String> = args().collect();
+  if !(args.contains(&String::from("-a")) || args.contains(&String::from("-i"))) {
+    const USAGE: &str = "Usage: vid-downloader [options]\n\
     Options:\n\
     -i --input: input url\n\
     -a --keep-alive: keep handling incoming links (type exit to quit)\n\
     ";
-
-  let args: Vec<String> = args().collect();
-  if !(args.contains(&String::from("-a")) || args.contains(&String::from("-i"))) {
     println!("{}", USAGE);
     return Ok(());
   }
 
   let input = parse_input(args);
+  let downloader = Arc::new(Mutex::new(Downloader::new()));
   if !input.keep_alive {
     let downloader_clone = downloader.clone();
     let resolution_clone = input.resolution.clone();
