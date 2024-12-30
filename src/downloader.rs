@@ -180,7 +180,7 @@ fn validate_url(url: &str) -> Result<(), DownloaderError> {
     return Err(DownloaderError::InvalidInputError);
   }
 
-  let twitter_regex = regex::Regex::new(r"https://(twitter|x).com/.+/status/\d+").unwrap();
+  let twitter_regex = regex::Regex::new(r"https:\/\/(twitter|x).com\/.+\/status\/\d+(\?.*)?").unwrap();
 
   if !twitter_regex.is_match(url) {
     return Err(DownloaderError::UnsupportedPlatformError);
