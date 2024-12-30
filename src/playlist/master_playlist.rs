@@ -1,6 +1,5 @@
 use crate::downloader_error::DownloaderError;
 use tokio::process::Command;
-use tracing::info;
 
 use crate::playlist::media_playlist::MediaPlaylist;
 
@@ -24,8 +23,6 @@ impl MasterPlaylist {
   }
 
   pub async fn download(&mut self) -> Result<String, DownloaderError> {
-    info!("Downloading video with urls: {} and {}", self.video_media_url, self.audio_media_url);
-
     self.video_media_playlist = Some(MediaPlaylist::from_url(&self.video_media_url).await?);
     self.audio_media_playlist = Some(MediaPlaylist::from_url(&self.audio_media_url).await?);
     let video_media_playlist = self.video_media_playlist.as_ref().unwrap();
@@ -60,7 +57,6 @@ impl MasterPlaylist {
     tokio::fs::remove_file(video_name).await.map_err(|_| DownloaderError::IOError)?;
     tokio::fs::remove_file(audio_name).await.map_err(|_| DownloaderError::IOError)?;
 
-    info!("Downloaded video {} successfully", output_name);
     Ok(output_name)
   }
 }
