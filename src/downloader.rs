@@ -1,39 +1,25 @@
-use headless_chrome::{
-  browser::{
-    tab::{RequestInterceptor, RequestPausedDecision},
-    transport::{SessionId, Transport},
-  },
-  protocol::cdp::{
-    Fetch::{events::RequestPausedEvent, RequestPattern, RequestStage},
-    Network::ResourceType,
-    Target::CreateTarget,
-  },
-  Browser, LaunchOptions,
-};
-use std::{
-  sync::{Arc, Mutex},
-  time::Duration,
-};
+use headless_chrome::{Browser, LaunchOptions};
+use std::{sync::Arc, time::Duration};
 use tracing::info;
 
-use crate::{downloader_error::DownloaderError, playlist::variant_playlist};
+use crate::{downloader_error::DownloaderError, platforms::twitter::TwitterDownloader};
 
-enum Platform {
-  Twitter,
-  Other,
-}
-
+#[derive(Clone)]
 pub enum PreferredResolution {
   High,
   Medium,
   Low,
 }
 
+pub trait PlatformDownloader {
+  async fn download(
+    browser: Arc<Browser>, url: &str, preferred_resolution: Option<PreferredResolution>,
+  ) -> Result<String, DownloaderError>;
+  fn validate_url(url: &str) -> Result<(), DownloaderError>;
+}
 
 pub struct Downloader {
   browser: Arc<Browser>,
-  request_patterns: Vec<RequestPattern>,
-  resolution: PreferredResolution, 
 }
 
 impl Downloader {
@@ -93,99 +79,26 @@ impl Downloader {
       });
     }
 
-    let video_pattern = RequestPattern {
-      url_pattern: Some("https://video.twimg.com/*_video/*".to_string()),
-      resource_Type: Some(ResourceType::Xhr),
-      request_stage: Some(RequestStage::Request),
-    };
-
-    Self { browser: browser, request_patterns: vec![video_pattern], resolution: PreferredResolution::High }
+    Self { browser: browser }
   }
 
-  fn get_interceptor(result: Arc<Mutex<String>>) -> Arc<dyn RequestInterceptor + Send + Sync> {
-    Arc::new(move |_transport: Arc<Transport>, _session_id: SessionId, event: RequestPausedEvent| {
-      let request = event.params.request.clone();
-
-      if request.url.contains("tag=") && result.lock().unwrap().is_empty() {
-        let mut mutex_guard = result.lock().unwrap();
-        let pure_url = match request.url.find('?') {
-          Some(index) => request.url[..index].to_string(),
-          None => request.url,
-        };
-
-        *mutex_guard = pure_url;
-      }
-
-      RequestPausedDecision::Continue(None)
-    })
-  }
-
-  pub async fn download(&self, url: &str) -> Result<String, DownloaderError> {
+  pub async fn download(&self, url: &str, preferred_resolution: Option<PreferredResolution>) -> Result<String, DownloaderError> {
     info!("Recieved download call: {url}");
 
-    validate_url(url)?;
-
-    let target = CreateTarget {
-      url: "about::blank".to_string(),
-      width: None,
-      height: None,
-      browser_context_id: None,
-      enable_begin_frame_control: None,
-      new_window: Some(true),
-      background: Some(true),
-    };
-
-    let tab = self.browser.new_tab_with_options(target)?;
-    let intercepted_result = Arc::new(Mutex::new(String::new()));
-    let interceptor = Self::get_interceptor(intercepted_result.clone());
-
-    tab.enable_fetch(Some(&self.request_patterns), None)?;
-    tab.enable_request_interception(interceptor)?;
-
-    tab.navigate_to(url)?;
-
-    let mut found = false;
-    let mut timeout = 10.0 as f32;
-    while !found && timeout >= 0.0 {
-      found = !intercepted_result.lock().unwrap().is_empty();
-      tokio::time::sleep(Duration::from_millis(100)).await;
-      timeout -= 0.1;
+    match url {
+      _ if TwitterDownloader::validate_url(url).is_ok() => {
+        TwitterDownloader::download(self.browser.clone(), url, preferred_resolution).await
+      },
+      _ if Self::is_url(url) => {
+        Err(DownloaderError::UnsupportedPlatformError)
+      },
+      _ => {
+        Err(DownloaderError::InvalidInputError)
+      },
     }
-
-    let _ = tab.close(false);
-
-    let variant_playlist_url = intercepted_result.lock().unwrap().to_owned();
-    let mut variant_playlist = variant_playlist::VariantPlaylist::from_url(&variant_playlist_url).await.map_err(|_| DownloaderError::FetchError)?;
-
-    if variant_playlist.master_playlists.is_empty() {
-      return Err(DownloaderError::NoMasterPlaylistError);
-    }
-    let resolution_index = match self.resolution {
-      PreferredResolution::High => 0,
-      PreferredResolution::Medium => variant_playlist.master_playlists.len() / 2,
-      PreferredResolution::Low => variant_playlist.master_playlists.len() - 1,
-    };
-
-    variant_playlist.master_playlists[resolution_index].download().await
   }
 
-  pub fn set_preferred_resolution(&mut self, resolution: PreferredResolution) {
-    self.resolution = resolution;
+  fn is_url(url: &str) -> bool {
+    return !url.is_empty() && url.starts_with("https://");
   }
-}
-
-fn validate_url(url: &str) -> Result<(), DownloaderError> {
-  info!("Validating url: {url}");
-  if url.is_empty() || !url.starts_with("https://") {
-    return Err(DownloaderError::InvalidInputError);
-  }
-
-  let twitter_regex = regex::Regex::new(r"https:\/\/(twitter|x).com\/.+\/status\/\d+(\?.*)?").unwrap();
-
-  if !twitter_regex.is_match(url) {
-    return Err(DownloaderError::UnsupportedPlatformError);
-  }
-
-  info!("Url validated: {url}");
-  Ok(())
 }

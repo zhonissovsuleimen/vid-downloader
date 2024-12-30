@@ -11,11 +11,13 @@ use tracing_subscriber::fmt::format::FmtSpan;
 mod downloader;
 mod downloader_error;
 mod playlist;
+mod platforms;
+
 
 struct InputArgs {
   url: String,
   keep_alive: bool,
-  resolution: PreferredResolution,
+  resolution: Option<PreferredResolution>,
 }
 
 #[tokio::main]
@@ -47,10 +49,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
   }
 
   let input = parse_input(args);
-  downloader.lock().await.set_preferred_resolution(input.resolution);
   if !input.keep_alive {
     let downloader_clone = downloader.clone();
-    let _ = tokio::spawn(async move { downloader_clone.lock().await.download(&input.url).await }).await;
+    let resolution_clone = input.resolution.clone();
+    let _ = tokio::spawn(async move { downloader_clone.lock().await.download(&input.url, resolution_clone).await }).await;
   }
 
   while input.keep_alive {
@@ -65,8 +67,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let downloader_clone = downloader.clone();
+    let resolution_clone = input.resolution.clone();
     tokio::spawn(async move {
-      let _ = downloader_clone.lock().await.download(&new_url).await;
+      let _ = downloader_clone.lock().await.download(&new_url, resolution_clone).await;
     });
   }
 
@@ -74,7 +77,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn parse_input(args: Vec<String>) -> InputArgs {
-  let mut input = InputArgs { url: String::new(), keep_alive: false, resolution: PreferredResolution::High };
+  let mut input = InputArgs { url: String::new(), keep_alive: false, resolution: None };
 
   let mut i = 1;
   while i < args.len() {
@@ -87,13 +90,13 @@ fn parse_input(args: Vec<String>) -> InputArgs {
         input.keep_alive = true;
       }
       "--high" | "-h" => {
-        input.resolution = PreferredResolution::High;
+        input.resolution = Some(PreferredResolution::High);
       }
       "--medium" | "-m" => {
-        input.resolution = PreferredResolution::Medium;
+        input.resolution = Some(PreferredResolution::Medium);
       }
       "--low" | "-l" => {
-        input.resolution = PreferredResolution::Low;
+        input.resolution = Some(PreferredResolution::Low);
       }
       _ => {}
     }
