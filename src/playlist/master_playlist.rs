@@ -1,7 +1,7 @@
-use crate::downloader_error::DownloaderError;
 use tokio::process::Command;
 use tracing::info;
 
+use crate::downloader_error::DownloaderError;
 use crate::playlist::media_playlist::MediaPlaylist;
 
 pub struct MasterPlaylist {
@@ -30,18 +30,12 @@ impl MasterPlaylist {
     self.audio_media_playlist = Some(MediaPlaylist::from_url(&self.audio_media_url).await?);
     let video_media_playlist = self.video_media_playlist.as_ref().unwrap();
     let audio_media_playlist = self.audio_media_playlist.as_ref().unwrap();
-    
+
     let video_bytes = video_media_playlist.get_byte_data();
     let audio_bytes = audio_media_playlist.get_byte_data();
-    
-    let video_name = video_media_playlist.name
-    .split('/').last().unwrap()
-    .split('.').next().unwrap()
-    .to_string();
-    let audio_name = audio_media_playlist.name
-    .split('/').last().unwrap()
-    .split('.').next().unwrap() 
-    .to_string();
+
+    let video_name = video_media_playlist.name.split('/').last().unwrap().split('.').next().unwrap().to_string();
+    let audio_name = audio_media_playlist.name.split('/').last().unwrap().split('.').next().unwrap().to_string();
     let output_name = format!("{}_{}.mp4", video_name, self.resolution);
 
     tokio::fs::write(video_name.clone(), video_bytes).await.map_err(|_| DownloaderError::IOError)?;
