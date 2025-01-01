@@ -84,6 +84,7 @@ impl Downloader {
   }
 
   pub async fn download(&self, url: &str, preferred_resolution: Option<PreferredResolution>) -> Result<String, DownloaderError> {
+    let url = url.trim_end();
     info!("Recieved download call: {url}");
 
     if !Self::is_url(url) {
