@@ -5,7 +5,6 @@ use std::{
   io::{self, Write},
   sync::Arc,
 };
-use tokio::sync::Mutex;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 mod downloader;
@@ -45,11 +44,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
   }
 
   let input = parse_input(args);
-  let downloader = Arc::new(Mutex::new(Downloader::new()));
+  let downloader = Arc::new(Downloader::new());
   if !input.keep_alive {
     let downloader_clone = downloader.clone();
     let resolution_clone = input.resolution.clone();
-    let _ = tokio::spawn(async move { downloader_clone.lock().await.download(&input.url, resolution_clone).await }).await;
+    let _ = tokio::spawn(async move { downloader_clone.download(&input.url, resolution_clone).await }).await;
   }
 
   while input.keep_alive {
@@ -66,7 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let downloader_clone = downloader.clone();
     let resolution_clone = input.resolution.clone();
     tokio::spawn(async move {
-      let _ = downloader_clone.lock().await.download(&new_url, resolution_clone).await;
+      let _ = downloader_clone.download(&new_url, resolution_clone).await;
     });
   }
 

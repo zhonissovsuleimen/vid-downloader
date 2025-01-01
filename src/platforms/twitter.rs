@@ -24,10 +24,8 @@ pub struct TwitterDownloader {}
 
 impl PlatformDownloader for TwitterDownloader {
   async fn download(
-    browser: Arc<Mutex<Browser>>, url: &str, preferred_resolution: Option<PreferredResolution>,
+    browser: Arc<Browser>, url: &str, preferred_resolution: Option<PreferredResolution>,
   ) -> Result<String, DownloaderError> {
-    let browser = browser.lock().await;
-
     let target = get_initial_tab_create_target();
     let tab = browser.new_tab_with_options(target)?;
     let intercepted_url = Arc::new(Mutex::new(String::new()));

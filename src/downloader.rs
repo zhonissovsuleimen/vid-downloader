@@ -1,6 +1,5 @@
 use headless_chrome::{Browser, LaunchOptions};
 use std::{sync::Arc, time::Duration};
-use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::{
@@ -17,13 +16,13 @@ pub enum PreferredResolution {
 
 pub trait PlatformDownloader {
   async fn download(
-    browser: Arc<Mutex<Browser>>, url: &str, preferred_resolution: Option<PreferredResolution>,
+    browser: Arc<Browser>, url: &str, preferred_resolution: Option<PreferredResolution>,
   ) -> Result<String, DownloaderError>;
   fn validate_url(url: &str) -> Result<(), DownloaderError>;
 }
 
 pub struct Downloader {
-  browser: Arc<Mutex<Browser>>,
+  browser: Arc<Browser>,
 }
 
 impl Downloader {
@@ -81,7 +80,7 @@ impl Downloader {
       });
     }
 
-    Self { browser: Arc::new(Mutex::new(browser)) }
+    Self { browser: Arc::new(browser) }
   }
 
   pub async fn download(&self, url: &str, preferred_resolution: Option<PreferredResolution>) -> Result<String, DownloaderError> {
