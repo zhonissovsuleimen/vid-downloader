@@ -1,6 +1,6 @@
 use headless_chrome::{Browser, LaunchOptions};
 use std::{sync::Arc, time::Duration};
-use tracing::info;
+use tracing::{info, error};
 
 use crate::{
   downloader_error::DownloaderError,
@@ -104,7 +104,7 @@ impl Downloader {
         Ok(output)
       }
       Err(e) => {
-        info!("Download failed for url: {url}");
+        error!("Download failed for url: {url} ({e})");
         Err(e)
       }
     }
