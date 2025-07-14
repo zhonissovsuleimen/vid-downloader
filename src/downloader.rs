@@ -29,7 +29,10 @@ impl Downloader {
   pub fn new() -> Self {
     let browser = Browser::new(LaunchOptions {
       idle_browser_timeout: Duration::from_secs(1e7 as u64),
-      args: vec![std::ffi::OsStr::new("--incognito")],
+      args: vec![
+        std::ffi::OsStr::new("--incognito"),
+        std::ffi::OsStr::new("--mute-audio")
+      ],
       ..Default::default()
     })
     .unwrap();
