@@ -1,5 +1,5 @@
 {
-  description = "vid-downloader-tg devshell";
+  description = "vid-downloader devshell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
