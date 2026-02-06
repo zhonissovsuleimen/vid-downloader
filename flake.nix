@@ -21,15 +21,8 @@
         chromium
       ];
 
-      shellHook = ''
-      '';
-
       env = {
-        TELOXIDE_TOKEN="8051788028:AAFDWTpwCSNxwB-a8PMqDgozaTNU5x-8pqA";
         RUST_BACKTRACE="1";
-        OPENSSL_DIR="${pkgs.openssl.dev}";
-        OPENSSL_LIB_DIR="${pkgs.openssl.out}/lib";
-        OPENSSL_INCLUDE_DIR="${pkgs.openssl.dev}/include";
       };
     };
   };
