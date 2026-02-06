@@ -22,9 +22,7 @@ use crate::{
 pub struct TiktokDownloader {}
 
 impl PlatformDownloader for TiktokDownloader {
-  async fn download(
-    browser: Arc<Browser>, url: &str, _preferred_resolution: Option<PreferredResolution>,
-  ) -> Result<String, DownloaderError> {
+  async fn download(browser: Arc<Browser>, url: &str, _preferred_resolution: Option<PreferredResolution>) -> Result<String, DownloaderError> {
     let target = get_initial_tab_create_target();
     let tab = browser.new_tab_with_options(target)?;
     let intercepted_url = Arc::new(Mutex::new(String::new()));
@@ -54,7 +52,10 @@ impl PlatformDownloader for TiktokDownloader {
     let cookie_mutex_guard = intercepted_cookie.lock().await.to_owned();
     let response = client
       .get(url_mutex_guard)
-      .header("User-Agent", r"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0")
+      .header(
+        "User-Agent",
+        r"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+      )
       .header("Referer", r"https://www.tiktok.com/")
       .header("Cookie", cookie_mutex_guard)
       .send()
@@ -109,14 +110,14 @@ fn get_interceptor(url: Arc<Mutex<String>>, cookie: Arc<Mutex<String>>) -> Arc<d
 fn get_request_patterns() -> Vec<RequestPattern> {
   vec![
     RequestPattern {
-    url_pattern: Some("https://v16-webapp-prime.tiktok.com/video/*".to_string()),
-    resource_Type: Some(ResourceType::Xhr),
-    request_stage: Some(RequestStage::Request),
+      url_pattern: Some("https://v16-webapp-prime.tiktok.com/video/*".to_string()),
+      resource_Type: Some(ResourceType::Xhr),
+      request_stage: Some(RequestStage::Request),
     },
     RequestPattern {
-    url_pattern: Some("https://v16-webapp-prime.tiktok.com/video/*".to_string()),
-    resource_Type: Some(ResourceType::Media),
-    request_stage: Some(RequestStage::Request),
+      url_pattern: Some("https://v16-webapp-prime.tiktok.com/video/*".to_string()),
+      resource_Type: Some(ResourceType::Media),
+      request_stage: Some(RequestStage::Request),
     },
   ]
 }
@@ -130,5 +131,10 @@ fn get_initial_tab_create_target() -> CreateTarget {
     enable_begin_frame_control: None,
     new_window: Some(true),
     background: Some(true),
+    left: None,
+    top: None,
+    window_state: None,
+    for_tab: None,
+    hidden: None,
   }
 }

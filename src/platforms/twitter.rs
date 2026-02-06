@@ -23,9 +23,7 @@ use crate::{
 pub struct TwitterDownloader {}
 
 impl PlatformDownloader for TwitterDownloader {
-  async fn download(
-    browser: Arc<Browser>, url: &str, preferred_resolution: Option<PreferredResolution>,
-  ) -> Result<String, DownloaderError> {
+  async fn download(browser: Arc<Browser>, url: &str, preferred_resolution: Option<PreferredResolution>) -> Result<String, DownloaderError> {
     let target = get_initial_tab_create_target();
     let tab = browser.new_tab_with_options(target)?;
     let intercepted_url = Arc::new(Mutex::new(String::new()));
@@ -48,7 +46,9 @@ impl PlatformDownloader for TwitterDownloader {
     }
 
     let variant_playlist_url = intercepted_url.lock().await.to_owned();
-    let mut variant_playlist = VariantPlaylist::from_url(&variant_playlist_url).await.map_err(|_| DownloaderError::FetchError)?;
+    let mut variant_playlist = VariantPlaylist::from_url(&variant_playlist_url)
+      .await
+      .map_err(|_| DownloaderError::FetchError)?;
 
     if variant_playlist.master_playlists.is_empty() {
       return Err(DownloaderError::NoMasterPlaylistError);
@@ -109,5 +109,10 @@ fn get_initial_tab_create_target() -> CreateTarget {
     enable_begin_frame_control: None,
     new_window: Some(true),
     background: Some(true),
+    left: None,
+    top: None,
+    window_state: None,
+    for_tab: None,
+    hidden: None,
   }
 }
